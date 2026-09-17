@@ -119,6 +119,24 @@ in the clipboard
 **Meta** — help, stop, repeat, go to sleep, wake up, be quiet, how fast,
 goodbye
 
+### Chaining
+
+Several commands in one breath. Jarvis runs them in order and stops at the first
+failure, so a dependent step never runs against the wrong window.
+
+```
+"open notepad and type hello lakshmanan welcome"
+"open chrome then go to youtube"
+"select all and copy and press enter"
+"minimize and then open spotify"
+```
+
+"and" is only a separator when a command verb follows it, so payloads survive:
+`search for cats and dogs` stays one search, and `type fish and chips and open
+chrome` splits only before `open`. After a step launches an app, the chain waits
+for that window to exist before running the next one — otherwise the typing
+would land in whatever was focused while the app was still starting.
+
 ---
 
 ## Why it's fast
@@ -266,7 +284,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 131 tests, ~0.4 s
+python -m pytest tests -q          :: 154 tests, ~0.7 s
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone
@@ -288,7 +306,8 @@ jarvis/
              fastinput (batched Win32 SendInput typing)
   speech/    stt (Vosk streaming), tts (SAPI5)
   skills/    input_control, apps, window, web, system, files, text_edit, meta
-  nlp/       matcher (normalisation, fuzzy), brain (optional LLM fallback)
+  nlp/       matcher (normalisation, fuzzy), chain (compound commands),
+             brain (optional LLM fallback)
   ui/        hud (always-on-top overlay + text console)
 ```
 

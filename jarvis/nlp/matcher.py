@@ -130,6 +130,10 @@ def strip_wake(text: str, wake_words: list[str]) -> tuple[bool, str]:
     return False, low
 
 
+# Minimum whole-string similarity a fuzzy hit must also clear. See the note
+# in `best_match`; 45 sits between the real matches (54+) and the junk (30).
+WHOLE_STRING_FLOOR = 45
+
 def best_match(query: str, choices: dict[str, str], cutoff: int = 72) -> str | None:
     """Return the value whose key best matches `query`, or None below `cutoff`.
 
@@ -141,12 +145,29 @@ def best_match(query: str, choices: dict[str, str], cutoff: int = 72) -> str | N
     query = query.strip().lower()
     if query in choices:
         return choices[query]
+    # Substring containment, but only when the two are comparable in length.
+    # Without the length guard a short alias swallows a long phrase: "notepad"
+    # is contained in "notepad and type hello lakshmanan welcome", which once
+    # made that entire sentence resolve to the Notepad window.
     for alias, value in choices.items():
-        if query in alias or alias in query:
+        if query in alias and len(query) >= len(alias) * 0.5:
+            return value
+        if alias in query and len(alias) >= len(query) * 0.5:
             return value
     if _rf_process is None:
         return None
     hit = _rf_process.extractOne(
         query, list(choices.keys()), scorer=_rf_fuzz.WRatio, score_cutoff=cutoff
     )
-    return choices[hit[0]] if hit else None
+    if hit is None:
+        return None
+    # WRatio ranks well but scores partial containment generously, so a long
+    # phrase that merely *contains* an alias scores as highly as a real match:
+    # measured against the window title "untitled - notepad", both "vs code"
+    # (a genuine near-miss) and "notepad and type hello lakshmanan welcome"
+    # (a whole sentence) score 85. Plain `ratio` is edit-distance over the
+    # combined length, which separates them cleanly -- 54 and 63 for real
+    # matches against 30 for the sentence -- so it serves as a sanity floor.
+    if _rf_fuzz.ratio(query, hit[0]) < WHOLE_STRING_FLOOR:
+        return None
+    return choices[hit[0]]

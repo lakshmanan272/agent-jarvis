@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 
+from jarvis.nlp.chain import split_commands
 from jarvis.nlp.matcher import light_clean, normalize, strip_lead_in
 from jarvis.skills import load_all_skills
 from jarvis.skills.base import REGISTRY, ActionResult, Context, Intent
@@ -38,6 +39,80 @@ class Router:
         return self._intents
 
     def dispatch(self, raw: str, _from_brain: bool = False) -> ActionResult:
+        """Run everything `raw` asks for — one command, or a sequence of them."""
+        steps = split_commands(raw)
+        if len(steps) > 1:
+            return self._dispatch_chain(steps)
+        return self._dispatch_one(steps[0] if steps else raw, _from_brain)
+
+    def _dispatch_chain(self, steps: list[str]) -> ActionResult:
+        """Run a sequence, stopping at the first step that fails.
+
+        Stopping matters: the steps are usually dependent. "Open notepad and
+        type hello" must not type into whatever was focused before, just
+        because Notepad failed to launch.
+        """
+        started = time.perf_counter()
+        done: list[str] = []
+        for index, step in enumerate(steps):
+            result = self._dispatch_one(step)
+
+            if result.needs_confirm or self.ctx.pending_confirm is not None:
+                # A confirmation mid-sequence would leave the remaining steps
+                # in limbo across an unbounded wait, so the rest is dropped and
+                # the user re-issues it after answering.
+                result.detail = (
+                    f"{result.detail} (stopped before {len(steps) - index - 1} "
+                    "more steps)".strip()
+                )
+                return self._finish(result, " / ".join(steps), started, "chain")
+
+            if not result.ok:
+                return self._finish(
+                    ActionResult(
+                        ok=False,
+                        say=f"Stopped at step {index + 1}: {result.say}",
+                        detail=result.detail or result.say,
+                        data={"failed_step": step, "completed": done},
+                    ),
+                    " / ".join(steps),
+                    started,
+                    "chain",
+                )
+            done.append(step)
+            self._settle(result)
+
+        # Speak the last step's acknowledgement rather than narrating each
+        # one; a chain that worked should sound like one action, not five.
+        last = self.ctx.last_result
+        return self._finish(
+            ActionResult(
+                ok=True,
+                say=(last.say if last and last.say else f"Done, {len(done)} steps."),
+                detail=" -> ".join(done),
+                data={"steps": done},
+            ),
+            " / ".join(steps),
+            started,
+            "chain",
+        )
+
+    def _settle(self, result: ActionResult) -> None:
+        """Let a step's side effect land before the next step depends on it.
+
+        Launching an app is asynchronous: the handler returns as soon as the
+        process is spawned, but the window it creates does not exist yet. Typing
+        into "whatever is focused" a millisecond later goes to the old window.
+        """
+        pending_window = result.data.get("await_window")
+        if not pending_window:
+            return
+        from jarvis.skills.window import wait_for_window
+
+        if wait_for_window(pending_window, timeout=6.0) is None:
+            log.warning("window %r never appeared", pending_window)
+
+    def _dispatch_one(self, raw: str, _from_brain: bool = False) -> ActionResult:
         started = time.perf_counter()
         text = normalize(raw)
 
@@ -91,7 +166,7 @@ class Router:
             plan = self.brain.plan(text, self._intents)
             if plan:
                 log.info("brain resolved %r -> %r", text, plan)
-                return self.dispatch(plan, _from_brain=True)
+                return self._dispatch_one(plan, _from_brain=True)
 
         return self._finish(
             ActionResult.fail(f"I don't know how to {text}."), text, started

@@ -126,7 +126,14 @@ def do_open(ctx, app: str = "", **_) -> ActionResult:
     if not launch(target):
         return ActionResult.fail(f"Couldn't start {app}.")
     ctx.last_target = app
-    return ActionResult(ok=True, say=f"Opening {app}.", data={"target": target})
+    # `await_window` tells a chained sequence to wait for this window before
+    # running the next step -- "open notepad and type hi" must not type into
+    # whatever was focused while Notepad was still starting.
+    return ActionResult(
+        ok=True,
+        say=f"Opening {app}.",
+        data={"target": target, "await_window": app},
+    )
 
 
 @intent(
