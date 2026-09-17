@@ -64,7 +64,10 @@ cyan listening, violet acting, green speaking, red muted.
 | Drag | Moves the orb; the bar follows |
 | Right-click | Menu: open console, mute/unmute, exit |
 
-The bar's header carries two buttons:
+The bar has a command box with a microphone button beside it — the two ways
+of giving a command sit together rather than in opposite corners — and a send
+arrow. Up and Down walk back through what you have typed. Its header carries
+two more buttons:
 
 **🎙 voice on / 🔇 voice off** cuts the microphone. Off really is off — the
 recogniser stops consuming audio rather than transcribing it and discarding the
@@ -355,7 +358,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 256 tests, ~1.7 s
+python -m pytest tests -q          :: 268 tests, ~2.5 s
 python tools/stress_test.py        :: 21 hardest phrasings, end to end
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent

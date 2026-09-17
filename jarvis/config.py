@@ -118,10 +118,13 @@ class BrainConfig:
 @dataclass
 class UIConfig:
     enabled: bool = True
-    opacity: float = 0.92
+    # Nearly solid. At 0.92 the window behind bled through the text enough
+    # to make a heard phrase hard to read, which defeats the point of
+    # showing it.
+    opacity: float = 0.97
     accent: str = "#22d3ee"
-    width: int = 520
-    height: int = 132
+    width: int = 560
+    height: int = 196
     margin: int = 28
     corner: str = "bottom-right"
 

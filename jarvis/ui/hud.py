@@ -35,6 +35,10 @@ OK = "#3fb950"
 BAD = "#f85149"
 ACCENT_ON = "#22d3ee"
 ACCENT_OFF = "#f85149"
+FIELD = "#161b22"
+FIELD_EDGE = "#2a313a"
+PLACEHOLDER = "Say “Hey Jarvis”, or type a command"
+ENTRY_HINT = "Type a command and press Enter"
 CHROMA = "#ff00fe"  # keyed out by -transparentcolor; must appear nowhere else
 
 ORB_SIZE = 78
@@ -48,6 +52,22 @@ STATE_LOOK = {
     "speaking": ("#15803d", "#3fb950", 0.5),
     "muted": ("#991b1b", "#f85149", 0.2),
 }
+
+
+def _hover(widget, over: str, out: str) -> None:
+    """Light a control up under the pointer, so it reads as clickable."""
+    widget.bind("<Enter>", lambda _e: widget.config(fg=over), add="+")
+    widget.bind("<Leave>", lambda _e: widget.config(fg=out), add="+")
+
+
+def _chip(parent, text: str, bg: str, fg: str, command) -> tk.Label:
+    """A small pill-shaped button."""
+    chip = tk.Label(
+        parent, text=text, bg=bg, fg=fg, cursor="hand2", padx=10, pady=3,
+        font=tkfont.Font(family="Consolas", size=10),
+    )
+    chip.bind("<Button-1>", lambda _e: command())
+    return chip
 
 
 class Orb:
@@ -193,69 +213,103 @@ class HUD:
         self.bar.configure(bg=BG)
 
         mono = tkfont.Font(family="Consolas", size=10)
-        big = tkfont.Font(family="Segoe UI", size=12)
+        big = tkfont.Font(family="Segoe UI", size=13)
+        entry_font = tkfont.Font(family="Segoe UI", size=12)
+        icon = tkfont.Font(family="Segoe UI Emoji", size=12)
 
+        # --- header: state on the left, controls on the right ---------------
         header = tk.Frame(self.bar, bg=BG)
-        header.pack(fill="x", padx=14, pady=(10, 2))
+        header.pack(fill="x", padx=18, pady=(12, 0))
 
-        self.state_dot = tk.Canvas(header, width=14, height=14, bg=BG, highlightthickness=0)
-        self.state_dot.pack(side="left")
-        self._dot_id = self.state_dot.create_oval(2, 2, 12, 12, fill="#30363d", width=0)
+        self.state_dot = tk.Canvas(header, width=12, height=12, bg=BG, highlightthickness=0)
+        self.state_dot.pack(side="left", pady=2)
+        self._dot_id = self.state_dot.create_oval(
+            1, 1, 11, 11, fill=STATE_LOOK["idle"][1], width=0
+        )
 
-        self.state_label = tk.Label(header, text="idle", bg=BG, fg=DIM, font=mono, anchor="w")
+        self.state_label = tk.Label(
+            header, text="idle", bg=BG, fg=DIM, font=mono, anchor="w"
+        )
         self.state_label.pack(side="left", padx=(8, 0))
 
-        close_btn = tk.Label(header, text="✕", bg=BG, fg=DIM, font=mono, cursor="hand2")
+        close_btn = tk.Label(
+            header, text="✕", bg=BG, fg=DIM, font=mono, cursor="hand2", padx=4
+        )
         close_btn.pack(side="right")
         close_btn.bind("<Button-1>", lambda _e: self.hide_bar())
+        _hover(close_btn, FG, DIM)
 
-        # Stop whatever is running. Packed first so it sits leftmost of the
-        # controls -- it is the one you reach for in a hurry.
-        self.end_btn = tk.Label(
-            header, text="■ end", bg="#3d1418", fg=ACCENT_OFF,
-            font=mono, cursor="hand2", padx=8, pady=2,
-        )
+        self.end_btn = _chip(header, "■ end", "#3d1418", ACCENT_OFF, self.end_task)
         self.end_btn.pack(side="right", padx=(0, 10))
-        self.end_btn.bind("<Button-1>", lambda _e: self.end_task())
-
-        # Voice on/off. Labelled with its *current* state rather than the action,
-        # so a glance answers "is the mic live right now?" without interpretation.
-        self.voice_btn = tk.Label(
-            header, text="🎙 voice on", bg="#10343d", fg=ACCENT_ON,
-            font=mono, cursor="hand2", padx=8, pady=2,
-        )
-        self.voice_btn.pack(side="right", padx=(0, 10))
-        self.voice_btn.bind("<Button-1>", lambda _e: self.toggle_voice())
 
         self.timing = tk.Label(header, text="", bg=BG, fg=DIM, font=mono, anchor="e")
-        self.timing.pack(side="right", padx=(0, 10))
+        self.timing.pack(side="right", padx=(0, 12))
+
+        # --- what was heard, and what came of it ----------------------------
+        body = tk.Frame(self.bar, bg=BG)
+        body.pack(fill="both", expand=True, padx=18, pady=(10, 4))
 
         self.heard = tk.Label(
-            self.bar, text="Say “Jarvis” or type below", bg=BG, fg=FG, font=big,
-            anchor="w", justify="left", wraplength=self.cfg.width - 28,
+            body, text=PLACEHOLDER, bg=BG, fg=FG, font=big,
+            anchor="w", justify="left", wraplength=self.cfg.width - 44,
         )
-        self.heard.pack(fill="x", padx=14, pady=(2, 2))
+        self.heard.pack(fill="x")
 
         self.status = tk.Label(
-            self.bar, text="", bg=BG, fg=DIM, font=mono, anchor="w",
-            wraplength=self.cfg.width - 28, justify="left",
+            body, text="", bg=BG, fg=DIM, font=mono, anchor="w",
+            wraplength=self.cfg.width - 44, justify="left",
         )
-        self.status.pack(fill="x", padx=14)
+        self.status.pack(fill="x", pady=(4, 0))
+
+        # --- the input row --------------------------------------------------
+        row = tk.Frame(self.bar, bg=BG)
+        row.pack(fill="x", padx=18, pady=(8, 16))
+
+        # A one-pixel frame behind the entry is how Tk gets a visible border:
+        # Entry's own relief options draw a bevel that looks wrong on a dark
+        # surface. The inner frame is the field, the outer is its edge.
+        self._entry_edge = tk.Frame(row, bg=FIELD_EDGE, padx=1, pady=1)
+        self._entry_edge.pack(side="left", fill="x", expand=True)
+        field = tk.Frame(self._entry_edge, bg=FIELD)
+        field.pack(fill="both", expand=True)
 
         self.entry = tk.Entry(
-            self.bar, bg="#161b22", fg=FG, insertbackground=self.cfg.accent,
-            relief="flat", font=mono,
+            field, bg=FIELD, fg=FG, insertbackground=self.cfg.accent,
+            relief="flat", font=entry_font, borderwidth=0,
+            highlightthickness=0, insertwidth=2,
         )
-        self.entry.pack(fill="x", padx=14, pady=(6, 12), ipady=5)
+        self.entry.pack(fill="x", padx=12, pady=9)
         self.entry.bind("<Return>", self._on_submit)
         self.entry.bind("<Escape>", lambda _e: self.hide_bar())
         self.entry.bind("<Up>", self._on_history)
+        self.entry.bind("<Down>", self._on_history_forward)
+        self.entry.bind("<FocusIn>", self._on_entry_focus)
+        self.entry.bind("<FocusOut>", self._on_entry_blur)
+
+        # Microphone, beside what you would type instead of it: the two ways of
+        # giving a command sit together rather than in separate corners.
+        self.mic_btn = tk.Label(
+            row, text="🎤", bg=FIELD, fg=ACCENT_ON, font=icon,
+            cursor="hand2", padx=12, pady=8,
+        )
+        self.mic_btn.pack(side="left", padx=(8, 0))
+        self.mic_btn.bind("<Button-1>", lambda _e: self.toggle_voice())
+
+        self.send_btn = tk.Label(
+            row, text="➤", bg=FIELD, fg=DIM, font=icon,
+            cursor="hand2", padx=12, pady=8,
+        )
+        self.send_btn.pack(side="left", padx=(8, 0))
+        self.send_btn.bind("<Button-1>", lambda _e: self._on_submit())
+        _hover(self.send_btn, self.cfg.accent, DIM)
 
         for widget in (self.bar, self.heard, self.status, header, self.state_label):
             widget.bind("<Button-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_move)
 
         self._history: list[str] = []
+        self._history_at = 0
+        self._placeholder_showing = False
         self._bar_visible = False
         self._user_moved_bar = False
         self._last_source = ""
@@ -325,7 +379,7 @@ class HUD:
         knowing a shortcut. It clears the text box as well, so whatever is typed
         there does not go on to run once the abort has landed.
         """
-        self.entry.delete(0, "end")
+        self.clear_entry()
         self.engine.panic()
 
     def toggle_voice(self) -> None:
@@ -338,11 +392,16 @@ class HUD:
         self._refresh_voice_button()
 
     def _refresh_voice_button(self) -> None:
+        """Show the microphone's real state, not the action clicking would take.
+
+        A glance should answer "is it listening?" without the user having to
+        work out whether the label is a state or an instruction.
+        """
         muted = self.engine.is_muted
-        self.voice_btn.config(
-            text="🔇 voice off" if muted else "🎙 voice on",
+        self.mic_btn.config(
+            text="🔇" if muted else "🎤",
             fg=ACCENT_OFF if muted else ACCENT_ON,
-            bg="#3d1418" if muted else "#10343d",
+            bg="#2a1518" if muted else FIELD,
         )
 
     def hide_bar(self) -> None:
@@ -435,19 +494,64 @@ class HUD:
     # --- input ---------------------------------------------------------------
 
     def _on_submit(self, _event=None) -> None:
-        text = self.entry.get().strip()
+        text = self.typed_text()
         if not text:
             return
-        self.entry.delete(0, "end")
+        self.clear_entry()
         self._history.append(text)
+        self._history_at = len(self._history)
         import threading
 
         threading.Thread(target=self.engine.submit, args=(text, "text"), daemon=True).start()
 
-    def _on_history(self, _event=None) -> None:
-        if self._history:
+    # --- the text box ---------------------------------------------------
+    # Tk has no placeholder, so it is grey text the widget is actually holding.
+    # Every read of the box has to know that, which is why `typed_text` exists
+    # rather than callers touching `entry.get()`.
+
+    def _on_entry_focus(self, _event=None) -> None:
+        self._entry_edge.config(bg=self.cfg.accent)
+        if self._placeholder_showing:
             self.entry.delete(0, "end")
-            self.entry.insert(0, self._history[-1])
+            self.entry.config(fg=FG)
+            self._placeholder_showing = False
+
+    def _on_entry_blur(self, _event=None) -> None:
+        self._entry_edge.config(bg=FIELD_EDGE)
+        self._show_placeholder()
+
+    def _show_placeholder(self) -> None:
+        """Say what the box is for while it is empty and unfocused."""
+        if self.entry.get():
+            return
+        self.entry.insert(0, ENTRY_HINT)
+        self.entry.config(fg=DIM)
+        self._placeholder_showing = True
+
+    def typed_text(self) -> str:
+        """What the user actually typed — never the placeholder."""
+        return "" if self._placeholder_showing else self.entry.get().strip()
+
+    def clear_entry(self) -> None:
+        self.entry.delete(0, "end")
+        self.entry.config(fg=FG)
+        self._placeholder_showing = False
+
+    def _on_history_forward(self, _event=None) -> None:
+        if not self._history:
+            return
+        self._history_at = min(self._history_at + 1, len(self._history))
+        self.clear_entry()
+        if self._history_at < len(self._history):
+            self.entry.insert(0, self._history[self._history_at])
+
+    def _on_history(self, _event=None) -> None:
+        """Walk back through what was typed, newest first."""
+        if not self._history:
+            return
+        self._history_at = max(0, self._history_at - 1)
+        self.clear_entry()
+        self.entry.insert(0, self._history[self._history_at])
 
     def focus_entry(self) -> None:
         self.show_bar()
