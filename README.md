@@ -149,7 +149,7 @@ Measured on a mid-range laptop, from the last syllable to the action:
 | Vosk incremental decode | ~40 ms, already done when you stop speaking |
 | Endpoint (trailing silence) | **180 ms**, our own, not Vosk's |
 | Normalise + route | **~30 µs** (`python -m jarvis --benchmark`) |
-| Actuate — typing a sentence | **~60 µs**, one `SendInput` call |
+| Actuate — typing a sentence | **~44 ms**, one clipboard paste |
 
 Five decisions carry most of that:
 
@@ -163,13 +163,21 @@ Five decisions carry most of that:
 3. **Regex routing, no model in the loop.** Intent matching is a sweep over
    compiled patterns. The LLM is a *fallback* for phrases that miss, and it only
    rewrites them into a command the router already knows.
-4. **Typing is one syscall, not one per key.** Every per-character API —
-   `typewrite`, `keybd_event` — pays a syscall and a scheduler slot per key, so
-   at the 10 ms interval slow apps need, a 43-character sentence costs 430 ms.
-   Win32's `SendInput` takes an *array* and injects it atomically: the same
-   sentence costs ~60 µs, about 7,000× less. It also carries Unicode rather
-   than virtual key codes, so it is layout-independent and types Tamil, emoji
-   and accented text that the old path could not.
+4. **Text is pasted, not typed.** Per-character typing costs a syscall and a
+   scheduler slot per key — 430 ms for a sentence at the 10 ms interval slow
+   apps need. A clipboard paste is one event the app reads in full: 44 ms
+   regardless of length, and exact regardless of how the target drains its
+   input queue. It handles Tamil, emoji and symbols that keystroke injection
+   mangles, and the previous clipboard contents are handed back afterwards
+   (and left alone if the user copied something in the meantime).
+
+   Batched `SendInput` is faster still — a whole sentence in ~60 µs — and it is
+   what single characters use, but it cannot be the default. Injected Unicode
+   arrives as `VK_PACKET`, and apps that resolve those against the *current*
+   keyboard state rather than per message mistype the tail of anything sent
+   faster than they drain. The Windows 11 Notepad turns "hello lakshmanan
+   welcome" into "hello lakshmanan eeeeeee", and needs 20 ms per character —
+   540 ms — before it is reliable. Correct at 44 ms beats wrong at 60 µs.
 5. **We decide when you stopped talking.** Vosk's endpointer is tuned for
    dictation and waits out a long pause; for commands that pause *is* the
    latency, because the words are already decoded. Jarvis watches the signal
@@ -284,7 +292,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 154 tests, ~0.7 s
+python -m pytest tests -q          :: 157 tests, ~0.6 s
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone
@@ -320,6 +328,7 @@ jarvis/
 | Hotkeys do nothing | Another app owns the combo, or the target window is elevated — run Jarvis as administrator |
 | Commands fire twice | Set `speech.partial_dispatch` to `false` |
 | It hears itself | Use headphones, or set `voice_out.enabled` to `false` |
+| Typed text comes out garbled | Report it — that app drains input unusually; the clipboard path should already handle it |
 
 ## Licence
 

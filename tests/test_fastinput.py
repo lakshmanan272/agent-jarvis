@@ -82,29 +82,101 @@ def test_partial_send_reports_failure(monkeypatch):
     assert fastinput.type_text("hello") is False
 
 
-def test_actuator_falls_back_when_sendinput_refuses(monkeypatch, real_actuator):
+# --- how actuator.type_text chooses a route --------------------------------
+# The clipboard leads because SendInput's Unicode packets are silently
+# mistyped by apps that resolve them lazily (the Windows 11 Notepad turns the
+# tail of a sentence into repeats of its last character). See type_text.
+
+
+def test_words_go_through_the_clipboard(monkeypatch, real_actuator):
     from jarvis.core import actuator
 
+    monkeypatch.setattr(
+        actuator.fastinput,
+        "type_text",
+        lambda *_a, **_k: pytest.fail("multi-char text must not use SendInput"),
+    )
+    copied, pasted = [], []
+    monkeypatch.setattr(actuator.pyperclip, "paste", lambda: "previous")
+    monkeypatch.setattr(actuator.pyperclip, "copy", copied.append)
+    monkeypatch.setattr(
+        actuator.pyautogui, "hotkey", lambda *k, **_kw: pasted.append(k)
+    )
+    real_actuator["type_text"]("hello lakshmanan welcome")
+    assert copied[0] == "hello lakshmanan welcome"
+    assert pasted == [("ctrl", "v")]
+
+
+def test_a_single_character_skips_the_clipboard(monkeypatch, real_actuator):
+    """Typing one comma should not borrow the user's clipboard."""
+    from jarvis.core import actuator
+
+    sent = []
+    monkeypatch.setattr(
+        actuator.fastinput, "type_text", lambda t: sent.append(t) or True
+    )
+    monkeypatch.setattr(
+        actuator.pyperclip,
+        "copy",
+        lambda _t: pytest.fail("a single character must not touch the clipboard"),
+    )
+    real_actuator["type_text"](",")
+    assert sent == [","]
+
+
+def test_falls_back_to_typing_when_the_clipboard_is_unavailable(
+    monkeypatch, real_actuator
+):
+    from jarvis.core import actuator
+
+    def no_clipboard(*_a, **_k):
+        raise OSError("clipboard locked")
+
+    monkeypatch.setattr(actuator.pyperclip, "copy", no_clipboard)
+    monkeypatch.setattr(actuator.pyperclip, "paste", no_clipboard)
     monkeypatch.setattr(actuator.fastinput, "type_text", lambda _t: False)
     typed = []
-    monkeypatch.setattr(
-        actuator.pyautogui, "typewrite", lambda t, **k: typed.append(t)
-    )
-    real_actuator["type_text"]("short", paste_threshold=50)
-    assert typed == ["short"]
+    monkeypatch.setattr(actuator.pyautogui, "typewrite", lambda t, **k: typed.append(t))
+    real_actuator["type_text"]("hello")
+    assert typed == ["hello"]
 
 
-def test_actuator_prefers_sendinput(monkeypatch, real_actuator):
+def test_clipboard_is_handed_back(monkeypatch, real_actuator):
     from jarvis.core import actuator
 
-    calls = []
+    clipboard = {"value": "the user's own copy"}
+    monkeypatch.setattr(actuator.pyperclip, "paste", lambda: clipboard["value"])
     monkeypatch.setattr(
-        actuator.fastinput, "type_text", lambda t: calls.append(t) or True
+        actuator.pyperclip, "copy", lambda t: clipboard.update(value=t)
     )
+    monkeypatch.setattr(actuator.pyautogui, "hotkey", lambda *a, **k: None)
+    timers = []
     monkeypatch.setattr(
-        actuator.pyautogui,
-        "typewrite",
-        lambda *_a, **_k: pytest.fail("should not reach the slow path"),
+        actuator.threading, "Timer", lambda _d, fn: _FakeTimer(fn, timers)
     )
-    real_actuator["type_text"]("anything at all, however long")
-    assert calls == ["anything at all, however long"]
+    real_actuator["type_text"]("pasted text")
+    assert clipboard["value"] == "pasted text"
+    timers[0]()  # the restore timer fires
+    assert clipboard["value"] == "the user's own copy"
+
+
+def test_restore_leaves_a_newer_copy_alone(monkeypatch):
+    """If the user copied something while we held the clipboard, it is theirs."""
+    from jarvis.core import actuator
+
+    clipboard = {"value": "something the user copied after us"}
+    monkeypatch.setattr(actuator.pyperclip, "paste", lambda: clipboard["value"])
+    monkeypatch.setattr(
+        actuator.pyperclip, "copy", lambda t: clipboard.update(value=t)
+    )
+    actuator._restore_clipboard("our old value", only_if="what we pasted")
+    assert clipboard["value"] == "something the user copied after us"
+
+
+class _FakeTimer:
+    def __init__(self, fn, sink):
+        self._fn = fn
+        sink.append(fn)
+
+    def start(self):
+        pass

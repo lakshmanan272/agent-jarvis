@@ -127,40 +127,83 @@ def hotkey(*keys: str) -> None:
     pyautogui.hotkey(*[normalize_key(k) for k in keys], _pause=False)
 
 
+# Below this length there is nothing for a lazy consumer to collapse, and
+# borrowing the clipboard to insert one comma would be rude.
+_KEYSTROKE_MAX = 1
+
+
 def type_text(text: str, paste_threshold: int = 24, interval: float = 0.0) -> None:
-    """Type `text` into the focused field, as close to instantly as Windows allows.
+    """Type `text` into the focused field, correctly and then quickly.
 
-    Three routes, best first:
+    The clipboard leads, which is not the obvious choice, so: injecting
+    characters with `KEYEVENTF_UNICODE` sends each one as VK_PACKET, and some
+    apps — including the Windows 11 Notepad — resolve queued packets against
+    the *current* keyboard state rather than the state carried by each message.
+    Send faster than they drain and the tail of the string collapses into
+    repeats of the last character. Measured in Notepad, typing
+    "hello lakshmanan welcome":
 
-    1. One batched `SendInput` call — the whole string atomically, in
-       microseconds, independent of keyboard layout. This is the normal path.
-    2. Clipboard paste — constant time, but it clobbers what the user had
-       copied and needs a beat to settle, so it is only for when (1) is refused
-       (an elevated window, the secure desktop, a non-Windows host).
-    3. Per-character typing, for short strings where the clipboard would be a
-       rude thing to touch.
+        clipboard paste            44 ms   correct
+        SendInput  5 ms/char      207 ms   "hello lakshmanan eeeeeee"
+        SendInput 10 ms/char      289 ms   "hello lakshmanan eelcome"
+        SendInput 20 ms/char      540 ms   correct
+        pyautogui typewrite       295 ms   correct
+
+    So the clipboard is both the fastest route and the only one that is exact
+    regardless of how the target app drains its input queue: the app receives
+    one paste and reads the whole string itself. The batched-SendInput path is
+    still far quicker where it works (a Tk entry takes the whole sentence in
+    microseconds), but "works" is not something we can detect in advance, and a
+    silently mistyped sentence is worse than 44 ms.
     """
     _check()
-    if fastinput.type_text(text):
+    if not text:
         return
 
-    log.debug("SendInput unavailable, falling back for %d chars", len(text))
-    if len(text) <= paste_threshold and text.isascii():
-        pyautogui.typewrite(text, interval=interval, _pause=False)
+    # One character cannot be corrupted by a lazy resolve, and this keeps
+    # "comma" or "space" instant without touching the clipboard.
+    if len(text) <= _KEYSTROKE_MAX and fastinput.type_text(text):
         return
+
+    if _paste(text):
+        return
+
+    log.debug("clipboard unavailable, falling back for %d chars", len(text))
+    if fastinput.type_text(text):
+        return
+    pyautogui.typewrite(text, interval=interval or 0.01, _pause=False)
+
+
+def _paste(text: str) -> bool:
+    """Put `text` on the clipboard, paste it, and hand the clipboard back."""
     try:
         saved = pyperclip.paste()
     except Exception:
         saved = None
-    pyperclip.copy(text)
-    time.sleep(0.02)  # give the clipboard a beat to settle before Ctrl+V
+    try:
+        pyperclip.copy(text)
+    except Exception:
+        log.debug("could not write the clipboard", exc_info=True)
+        return False
+    time.sleep(0.02)  # the clipboard write is asynchronous; let it land
     pyautogui.hotkey("ctrl", "v", _pause=False)
     if saved is not None:
-        threading.Timer(0.6, lambda: _restore_clipboard(saved)).start()
+        # Late enough that the paste has certainly been read, soon enough that
+        # the user's own clipboard is theirs again before they notice.
+        threading.Timer(0.6, lambda: _restore_clipboard(saved, only_if=text)).start()
+    return True
 
 
-def _restore_clipboard(value: str) -> None:
+def _restore_clipboard(value: str, only_if: str | None = None) -> None:
+    """Hand the clipboard back, unless something else has claimed it since.
+
+    `only_if` is the text we pasted. If the clipboard no longer holds it, the
+    user (or another app) copied something in the meantime, and restoring would
+    destroy their copy instead of ours.
+    """
     try:
+        if only_if is not None and pyperclip.paste() != only_if:
+            return
         pyperclip.copy(value)
     except Exception:
         log.debug("could not restore clipboard", exc_info=True)
