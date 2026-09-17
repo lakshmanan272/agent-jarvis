@@ -120,6 +120,7 @@ def do_restore(ctx, app: str | None = None, **_) -> ActionResult:
     r"^(?:snap|dock|move)\s+(?:the\s+)?(?:window\s+)?(?:to\s+(?:the\s+)?)?"
     r"(?P<side>left|right)(?:\s+(?:half|side))?$",
     name="snap_window",
+    examples=('snap to the left',),
     priority=5,
     description="Snap the active window to one half of the screen",
 )
@@ -132,6 +133,7 @@ def do_snap(ctx, side: str = "left", **_) -> ActionResult:
     r"^(?:move|send)\s+(?:the\s+)?(?:window\s+)?to\s+(?:the\s+)?"
     r"(?:other|next|second)\s+(?:monitor|screen|display)$",
     name="move_monitor",
+    examples=('move the window to the other monitor',),
     description="Throw the active window onto the next monitor",
 )
 def do_move_monitor(ctx, **_) -> ActionResult:

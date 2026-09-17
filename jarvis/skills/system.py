@@ -59,6 +59,7 @@ def do_set_volume(ctx, level: str = "50", **_) -> ActionResult:
     r"^(?:turn|make)\s+(?:it\s+)?(?:the\s+)?(?:volume\s+)?"
     r"(?P<direction>up|down|louder|quieter)$",
     name="volume_step",
+    examples=('volume up',),
     priority=6,
     description="Nudge the volume",
 )
@@ -85,6 +86,7 @@ def do_mute(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:pause|resume|play\s*pause|play)$",
     name="media_play_pause",
+    examples=('pause',),
     priority=7,
     description="Play or pause media",
 )
@@ -97,6 +99,7 @@ def do_play_pause(ctx, **_) -> ActionResult:
     r"^(?:next|skip)(?:\s+(?:track|song))?$",
     r"^(?:previous|last)\s+(?:track|song)$",
     name="media_track",
+    examples=('next track',),
     priority=6,
     description="Skip to the next or previous track",
 )
@@ -146,6 +149,7 @@ def do_lock(ctx, **_) -> ActionResult:
     r"^(?P<action>shut\s*down|restart|reboot|sign\s*out|log\s*off|hibernate|sleep)"
     r"(?:\s+(?:the\s+)?(?:pc|computer|system|windows))?$",
     name="power",
+    examples=('shutdown', 'restart', 'sleep'),
     priority=7,
     description="Shut down, restart, sleep or sign out",
     destructive=True,
@@ -261,6 +265,7 @@ def do_status(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:night\s+light|dark\s+mode|light\s+mode)$",
     name="open_display_settings",
+    examples=('dark mode',),
     description="Open display settings",
 )
 def do_display_settings(ctx, **_) -> ActionResult:
@@ -271,6 +276,10 @@ def do_display_settings(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:open\s+)?(?:wifi|wi\s*fi|bluetooth|network)\s*(?:settings)?$",
     name="open_network_settings",
+    examples=('open wifi settings',),
+    # Above open_app, which would otherwise try to launch an application
+    # called "wifi settings".
+    priority=5,
     description="Open network or Bluetooth settings",
 )
 def do_network_settings(ctx, **_) -> ActionResult:

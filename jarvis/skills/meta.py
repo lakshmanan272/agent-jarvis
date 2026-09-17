@@ -13,6 +13,7 @@ _GREETINGS = ("At your service.", "Ready.", "Listening.", "Go ahead.")
     r"^(?:hi|hello|hey|yo|good\s+(?:morning|afternoon|evening))$",
     r"^are\s+you\s+(?:there|awake|ready)$",
     name="greet",
+    examples=('hello',),
     priority=9,
     description="Say hello",
 )
@@ -74,6 +75,7 @@ def do_help(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:go\s+to\s+sleep|sleep\s+mode|stop\s+listening|mute\s+yourself)$",
     name="sleep_listening",
+    examples=('go to sleep',),
     priority=12,
     description="Stop acting on speech until woken by hotkey or wake word",
 )
@@ -85,6 +87,7 @@ def do_sleep(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:wake\s+up|start\s+listening|unmute\s+yourself)$",
     name="wake_listening",
+    examples=('wake up',),
     priority=12,
     description="Resume acting on speech",
 )
@@ -97,6 +100,7 @@ def do_wake(ctx, **_) -> ActionResult:
     r"^(?:speak|talk)\s+(?P<state>on|off)$",
     r"^(?:be\s+)?(?P<state>quiet|silent)$",
     name="toggle_voice",
+    examples=('speak off',),
     priority=10,
     description="Turn spoken replies on or off",
 )
@@ -108,8 +112,13 @@ def do_toggle_voice(ctx, state: str = "off", **_) -> ActionResult:
 
 @intent(
     r"^(?:shut\s*down|exit|quit|close)\s+(?:jarvis|yourself)$",
+    # `normalize` strips the wake word, so "exit jarvis" arrives as "exit" and
+    # the pattern above can never fire by voice. Bare "exit"/"quit" is free:
+    # close_app requires something to close after the verb.
+    r"^(?:exit|quit)$",
     r"^goodbye$",
     name="exit_jarvis",
+    examples=('exit jarvis',),
     priority=30,
     description="Shut Jarvis down",
 )

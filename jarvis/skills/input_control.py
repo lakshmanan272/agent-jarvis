@@ -45,6 +45,7 @@ def do_click(ctx, kind: str = "", button: str = "", **_) -> ActionResult:
 @intent(
     r"^click(?:\s+(?:at|on))?\s+(?P<x>\d+)[\s,]+(?P<y>\d+)$",
     name="click_at",
+    examples=('click at 400 300',),
     priority=7,
     description="Click at exact screen coordinates",
 )
@@ -55,6 +56,7 @@ def do_click_at(ctx, x: str = "0", y: str = "0", **_) -> ActionResult:
 @intent(
     r"^(?:move|go)\s+(?:mouse\s+|cursor\s+)?to\s+(?P<x>\d+)[\s,]+(?P<y>\d+)$",
     name="move_to",
+    examples=('move to 400 300',),
     priority=7,
     description="Move the cursor to exact screen coordinates",
 )
@@ -77,6 +79,7 @@ def _goto(px: int, py: int, click: bool) -> ActionResult:
     r"(?P<direction>up|down|left|right)"
     r"(?:\s+(?:by\s+)?(?P<amount>\d+))?(?:\s*(?:pixels?|px))?$",
     name="move_mouse",
+    examples=('move the mouse right 200',),
     description="Nudge the cursor in a direction",
 )
 def do_move_mouse(
@@ -96,6 +99,7 @@ def do_move_mouse(
 @intent(
     r"^drag(?:\s+to)?\s+(?P<x>\d+)[\s,]+(?P<y>\d+)$",
     name="drag",
+    examples=('drag to 900 500',),
     description="Drag from the cursor to coordinates",
 )
 def do_drag(ctx, x: str = "0", y: str = "0", **_) -> ActionResult:
@@ -177,6 +181,7 @@ def do_select_all(ctx, **_) -> ActionResult:
 @intent(
     r"^select\s+(?:the\s+)?(?P<unit>word|line|paragraph|to\s+end|to\s+start)$",
     name="select_unit",
+    examples=('select the line',),
     priority=5,
     description="Select the word, line or paragraph at the caret",
 )
@@ -200,6 +205,7 @@ def do_select_unit(ctx, unit: str = "line", **_) -> ActionResult:
     r"^select\s+(?P<count>\d+)\s+(?P<unit>words?|lines?|characters?|chars?)"
     r"(?:\s+(?P<direction>left|right|up|down))?$",
     name="select_count",
+    examples=('select 3 words',),
     priority=6,
     description="Select N words, lines or characters",
 )
@@ -298,6 +304,11 @@ def do_delete(
     r"^(?:go|move|jump)\s+to\s+(?:the\s+)?(?P<where>top|bottom|start|end|"
     r"end\s+of\s+line|start\s+of\s+line)$",
     name="caret_jump",
+    examples=('go to the top',),
+    # Above focus_app, which otherwise reads "go to the top" as a window named
+    # "the top". The pattern only accepts caret positions, so it cannot steal a
+    # real "go to <app>".
+    priority=5,
     description="Move the text caret",
 )
 def do_caret_jump(ctx, where: str = "top", **_) -> ActionResult:

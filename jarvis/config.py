@@ -87,12 +87,26 @@ class HotkeyConfig:
 @dataclass
 class BrainConfig:
     """Optional LLM fallback for phrases the local router cannot resolve."""
+
     enabled: bool = False
-    provider: str = "anthropic"       # "anthropic" | "ollama"
+    # "anthropic" | "ollama" | "openai" -- the last covers every service that
+    # speaks the OpenAI chat format, which is Groq, OpenRouter, Together,
+    # Gemini's compatibility endpoint and a local llama.cpp server.
+    provider: str = "anthropic"
     model: str = "claude-haiku-4-5-20251001"
+    # Read from the environment first. `api_key` is the fallback, and lives in
+    # the user's own config file outside the repository -- a key must never be
+    # committed.
     api_key_env: str = "ANTHROPIC_API_KEY"
+    api_key: str = ""
+    base_url: str = ""                # for provider "openai"
     ollama_url: str = "http://127.0.0.1:11434"
     timeout_s: float = 8.0
+
+    def key(self) -> str:
+        import os
+
+        return os.environ.get(self.api_key_env, "") or self.api_key
 
 
 @dataclass

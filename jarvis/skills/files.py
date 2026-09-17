@@ -67,6 +67,7 @@ def do_create_folder(ctx, name: str = "", where: str | None = None, **_) -> Acti
     r"^(?:create|make|new)\s+(?:a\s+)?file\s+(?:called\s+|named\s+)?(?P<name>[\w.\- ]+?)"
     r"(?:\s+(?:in|on)\s+(?P<where>.+))?$",
     name="create_file",
+    examples=('create file notes.txt',),
     verbatim=True,
     priority=8,
     description="Create an empty file",
@@ -87,6 +88,7 @@ def do_create_file(ctx, name: str = "", where: str | None = None, **_) -> Action
     r"^(?:open|show)\s+(?:the\s+)?(?P<name>desktop|downloads|documents|pictures|"
     r"music|videos|home)\s*(?:folder)?$",
     name="open_folder",
+    examples=('open downloads',),
     priority=9,
     description="Open a known folder in Explorer",
 )
@@ -101,6 +103,7 @@ def do_open_folder(ctx, name: str = "", **_) -> ActionResult:
 @intent(
     r"^(?:delete|remove|trash)\s+(?:the\s+)?(?:file|folder)\s+(?P<path>.+)$",
     name="delete_path",
+    examples=('delete file report.txt',),
     verbatim=True,
     priority=8,
     description="Delete a file or folder",
@@ -126,6 +129,7 @@ def do_delete_path(ctx, path: str = "", _confirmed: bool = False, **_) -> Action
 @intent(
     r"^(?:find|search\s+for)\s+(?:the\s+)?(?:file|files|folder)s?\s+(?P<query>.+)$",
     name="search_files",
+    examples=('find files budget',),
     verbatim=True,
     priority=9,
     description="Search files with Windows Search",
@@ -142,6 +146,7 @@ def do_search_files(ctx, query: str = "", **_) -> ActionResult:
     r"^(?:open|start)\s+(?:the\s+)?(?:windows\s+)?search$",
     r"^search\s+(?:in\s+)?windows\s+(?:for\s+)?(?P<query>.+)$",
     name="windows_search",
+    examples=('open windows search',),
     verbatim=True,
     priority=8,
     description="Open the Start-menu search, optionally with a query",
@@ -171,6 +176,7 @@ def do_read_clipboard(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:run|execute)\s+command\s+(?P<command>.+)$",
     name="run_command",
+    examples=('run command git status',),
     verbatim=True,
     priority=9,
     description="Run a shell command in a visible terminal",

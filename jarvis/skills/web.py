@@ -212,6 +212,7 @@ def do_reopen_tab(ctx, **_) -> ActionResult:
     r"^(?:next|previous|last)\s+tab$",
     r"^(?:go\s+to\s+)?tab\s+(?P<number>\d+)$",
     name="switch_tab",
+    examples=('next tab',),
     priority=6,
     description="Move between browser tabs",
 )
@@ -251,6 +252,7 @@ def do_forward(ctx, **_) -> ActionResult:
     r"^(?:find|search)\s+(?P<query>.+?)\s+(?:on|in)\s+(?:this\s+)?page$",
     r"^find\s+in\s+page\s+(?P<query>.+)$",
     name="find_in_page",
+    examples=('find pricing on this page',),
     verbatim=True,
     priority=9,
     description="Ctrl+F for a phrase on the current page",
@@ -265,6 +267,7 @@ def do_find_in_page(ctx, query: str = "", **_) -> ActionResult:
 @intent(
     r"^(?:bookmark|save)\s+(?:this\s+)?page$",
     name="bookmark",
+    examples=('bookmark this page',),
     priority=6,
     description="Bookmark the current page",
 )

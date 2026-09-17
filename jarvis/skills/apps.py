@@ -110,7 +110,7 @@ def _known_site(name: str) -> str | None:
     name="open_app",
     priority=3,
     description="Open an application, folder or settings page",
-    examples=("open chrome", "launch vscode", "open downloads"),
+    examples=("open chrome", "launch vscode", "start spotify"),
 )
 def do_open(ctx, app: str = "", **_) -> ActionResult:
     app = app.strip()
@@ -173,7 +173,13 @@ def do_open(ctx, app: str = "", **_) -> ActionResult:
 
 @intent(
     r"^(?:switch|go|jump)\s+to\s+(?P<app>.+)$",
-    r"^(?:focus|bring\s+up|show)\s+(?:the\s+)?(?P<app>.+?)(?:\s+window)?$",
+    # At most three words. An unbounded tail made "show me what time it is"
+    # match with app="me what time it is": the handler then failed, and because
+    # a match ends the search, the phrase never reached the LLM planner that
+    # would have understood it. A pattern that swallows sentences is worse than
+    # no pattern at all.
+    r"^(?:focus|bring\s+up|show)\s+(?:the\s+)?(?P<app>\S+(?:\s+\S+){0,2}?)"
+    r"(?:\s+window)?$",
     name="focus_app",
     priority=4,
     description="Bring an already-running window to the front",
@@ -197,7 +203,10 @@ def do_focus(ctx, app: str = "", **_) -> ActionResult:
 )
 def do_close(ctx, app: str = "", **_) -> ActionResult:
     app = app.strip()
-    if app in ("this", "that", "it", "window", "current window"):
+    if app in (
+        "this", "that", "it", "window", "current window",
+        "this window", "that window", "the window",
+    ):
         from jarvis.core import actuator as act
 
         act.hotkey("alt", "f4")
@@ -227,6 +236,7 @@ def do_restart(ctx, app: str = "", **_) -> ActionResult:
     r"^(?:what|which)\s+(?:apps?|programs?|windows?)\s+(?:are\s+)?"
     r"(?:open|running)$",
     name="list_apps",
+    examples=('what apps are open',),
     description="List open windows",
 )
 def do_list(ctx, **_) -> ActionResult:

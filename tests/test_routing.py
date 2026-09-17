@@ -169,3 +169,54 @@ def test_handler_exception_becomes_a_failed_result(router, monkeypatch):
     result = router.dispatch("select all")
     assert result.ok is False
     assert "simulated failure" in result.detail
+
+
+# --- the catalog handed to the LLM planner must not be fiction --------------
+# `Brain` shows the model one example phrasing per intent and asks it to reply
+# with one of them. 33 of 91 entries were the intent's own name with the
+# underscores removed -- "volume step", "power", "media track" -- none of which
+# route anywhere. The planner dutifully echoed them back and every rewrite
+# failed. Three of the entries also turned out to be genuinely unreachable
+# commands: "exit jarvis" normalises to "exit", which its pattern could not
+# match, so that command could never be given by voice at all.
+
+
+def test_every_example_routes_to_its_own_intent(router):
+    from jarvis.nlp.matcher import normalize
+
+    wrong = []
+    for intent in router.intents:
+        examples = intent.examples or (intent.name.replace("_", " "),)
+        for example in examples:
+            text = normalize(example)
+            hit = next((i.name for i in router.intents if i.match(text)), None)
+            if hit != intent.name:
+                wrong.append(f"{intent.name}: {example!r} routes to {hit!r}")
+    assert wrong == [], "examples that do not do what they claim:\n" + "\n".join(wrong)
+
+
+def test_the_catalog_only_offers_working_phrasings(router):
+    """End to end: every line the planner is actually shown must be sayable.
+
+    Intents without an explicit example fall back to their own name, which for
+    "stop", "copy" or "undo" is exactly what a user would say and for
+    "volume_step" or "media_track" is not. This checks the result rather than
+    demanding ceremony from the former.
+    """
+    from jarvis.config import Config
+    from jarvis.nlp.brain import Brain
+    from jarvis.nlp.matcher import normalize
+
+    catalog = Brain(Config().brain)._build_catalog(router.intents)
+    offered = [
+        line.split("  (")[0].removeprefix("- ").strip()
+        for line in catalog.splitlines()
+        if line.startswith("- ")
+    ]
+    assert offered, "catalog is empty"
+    dead = [
+        phrase
+        for phrase in offered
+        if not any(i.match(normalize(phrase)) for i in router.intents)
+    ]
+    assert dead == [], f"catalog offers phrases that match nothing: {dead}"

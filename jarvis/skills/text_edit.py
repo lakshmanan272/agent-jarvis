@@ -80,6 +80,7 @@ def do_newline(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:new\s+paragraph|paragraph\s+break)$",
     name="paragraph",
+    examples=('new paragraph',),
     priority=6,
     description="Insert a blank line",
 )
@@ -151,6 +152,7 @@ def do_change_case(ctx, case: str = "", **_) -> ActionResult:
 @intent(
     r"^(?:trim|strip)(?:\s+(?:it|that|whitespace))?$",
     name="trim_selection",
+    examples=('trim',),
     description="Strip whitespace from the selection",
 )
 def do_trim(ctx, **_) -> ActionResult:
@@ -169,6 +171,7 @@ def do_join_lines(ctx, **_) -> ActionResult:
 @intent(
     r"^replace\s+(?P<old>.+?)\s+with\s+(?P<new>.+)$",
     name="find_replace",
+    examples=('replace cat with dog',),
     verbatim=True,
     priority=8,
     description="Find and replace within the selection",
