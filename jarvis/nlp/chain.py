@@ -78,6 +78,9 @@ def split_commands(raw: str) -> list[str]:
     for chunk in _STRONG.split(text):
         parts.extend(_WEAK.split(chunk))
 
-    steps = [p.strip(" ,.") for p in parts]
+    # Whitespace only. Stripping punctuation here would eat it from dictated
+    # text: "type call me at 5pm." must keep its full stop, and the separator
+    # punctuation has already been consumed by the patterns above.
+    steps = [p.strip() for p in parts]
     steps = [s for s in steps if s]
     return steps[:MAX_STEPS] if steps else [text]

@@ -117,6 +117,7 @@ def normalize_key(key: str) -> str:
 
 def press(*keys: str, presses: int = 1) -> None:
     _check()
+    _await_paste()
     for _ in range(presses):
         for key in keys:
             pyautogui.press(normalize_key(key), _pause=False)
@@ -124,6 +125,7 @@ def press(*keys: str, presses: int = 1) -> None:
 
 def hotkey(*keys: str) -> None:
     _check()
+    _await_paste()
     pyautogui.hotkey(*[normalize_key(k) for k in keys], _pause=False)
 
 
@@ -174,19 +176,48 @@ def type_text(text: str, paste_threshold: int = 24, interval: float = 0.0) -> No
     pyautogui.typewrite(text, interval=interval or 0.01, _pause=False)
 
 
+# Ctrl+V is asynchronous: the target reads the clipboard when it drains its
+# message queue, not when the keys arrive. Overwrite the clipboard before then
+# and the earlier paste yields the later text -- a six-step chain typed its last
+# line three times. Measured against Notepad, back-to-back pastes need ~30 ms
+# between them; this is double that for headroom, and it is only ever paid by
+# the *next* paste, so a single command adds nothing.
+PASTE_SETTLE_S = 0.06
+_paste_lock = threading.Lock()
+_last_paste_at = 0.0
+
+
+def _await_paste() -> None:
+    """Block until a recent paste has had time to be consumed.
+
+    Anything that follows a paste has to wait for it, not just the next paste:
+    a chain of "type ... / press enter / type ..." delivered Enter while the
+    first paste was still queued, and the newline vanished. Costs nothing when
+    no paste is outstanding.
+    """
+    remaining = PASTE_SETTLE_S - (time.monotonic() - _last_paste_at)
+    if remaining > 0:
+        time.sleep(remaining)
+
+
 def _paste(text: str) -> bool:
     """Put `text` on the clipboard, paste it, and hand the clipboard back."""
-    try:
-        saved = pyperclip.paste()
-    except Exception:
-        saved = None
-    try:
-        pyperclip.copy(text)
-    except Exception:
-        log.debug("could not write the clipboard", exc_info=True)
-        return False
-    time.sleep(0.02)  # the clipboard write is asynchronous; let it land
-    pyautogui.hotkey("ctrl", "v", _pause=False)
+    global _last_paste_at
+    with _paste_lock:
+        _await_paste()  # the previous paste must land before this one starts
+
+        try:
+            saved = pyperclip.paste()
+        except Exception:
+            saved = None
+        try:
+            pyperclip.copy(text)
+        except Exception:
+            log.debug("could not write the clipboard", exc_info=True)
+            return False
+        time.sleep(0.02)  # the clipboard write is asynchronous; let it land
+        pyautogui.hotkey("ctrl", "v", _pause=False)
+        _last_paste_at = time.monotonic()
     if saved is not None:
         # Late enough that the paste has certainly been read, soon enough that
         # the user's own clipboard is theirs again before they notice.

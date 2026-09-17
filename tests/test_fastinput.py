@@ -180,3 +180,63 @@ class _FakeTimer:
 
     def start(self):
         pass
+
+
+# --- pasting in quick succession ------------------------------------------
+# Ctrl+V is asynchronous: the target reads the clipboard when it drains its
+# message queue. A six-step chain that typed three different lines put the
+# last one on screen three times, and an Enter between two pastes vanished.
+
+
+def test_a_second_paste_waits_for_the_first(monkeypatch, real_actuator):
+    from jarvis.core import actuator
+
+    monkeypatch.setattr(actuator.pyperclip, "paste", lambda: "")
+    monkeypatch.setattr(actuator.pyperclip, "copy", lambda _t: None)
+    monkeypatch.setattr(actuator.pyautogui, "hotkey", lambda *a, **k: None)
+    monkeypatch.setattr(actuator.threading, "Timer", lambda _d, _f: _NullTimer())
+
+    slept: list[float] = []
+    monkeypatch.setattr(actuator.time, "sleep", slept.append)
+    monkeypatch.setattr(actuator, "_last_paste_at", actuator.time.monotonic())
+
+    real_actuator["type_text"]("second line")
+    assert any(
+        s >= actuator.PASTE_SETTLE_S * 0.5 for s in slept
+    ), f"expected a settle wait, slept {slept}"
+
+
+def test_a_keystroke_waits_for_a_pending_paste(monkeypatch, real_actuator):
+    """"type X / press enter" dropped the newline without this."""
+    from jarvis.core import actuator
+
+    monkeypatch.setattr(actuator.pyautogui, "press", lambda *a, **k: None)
+    slept: list[float] = []
+    monkeypatch.setattr(actuator.time, "sleep", slept.append)
+    monkeypatch.setattr(actuator, "_last_paste_at", actuator.time.monotonic())
+
+    real_actuator["press"]("enter")
+    assert slept and slept[0] > 0
+
+
+def test_no_wait_when_nothing_was_pasted(monkeypatch, real_actuator):
+    from jarvis.core import actuator
+
+    monkeypatch.setattr(actuator.pyautogui, "press", lambda *a, **k: None)
+    slept: list[float] = []
+    monkeypatch.setattr(actuator.time, "sleep", slept.append)
+    monkeypatch.setattr(actuator, "_last_paste_at", 0.0)  # long ago
+
+    real_actuator["press"]("enter")
+    assert slept == []
+
+
+def test_the_settle_is_short_enough_to_stay_responsive():
+    from jarvis.core import actuator
+
+    assert actuator.PASTE_SETTLE_S <= 0.1
+
+
+class _NullTimer:
+    def start(self):
+        pass

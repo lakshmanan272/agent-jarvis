@@ -312,7 +312,8 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 191 tests, ~0.6 s
+python -m pytest tests -q          :: 195 tests, ~0.8 s
+python tools/stress_test.py        :: 21 hardest phrasings, end to end
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone

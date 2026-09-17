@@ -82,6 +82,11 @@ class Router:
                     f"{result.detail} (stopped before {len(steps) - index - 1} "
                     "more steps)".strip()
                 )
+                # _finish only fills a missing intent, and this result already
+                # carries the stopping step's. Overwrite it so every outcome of
+                # a chain reports "chain", and keep the step's name alongside.
+                result.data["stopped_at"] = result.data.get("intent")
+                result.data["intent"] = "chain"
                 return self._finish(result, " / ".join(steps), started, "chain")
 
             if not result.ok:
