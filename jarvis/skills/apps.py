@@ -98,6 +98,13 @@ def launch(target: str) -> bool:
         return False
 
 
+def _known_site(name: str) -> str | None:
+    """A bookmarked site name, so "open chrome and youtube" can mean both."""
+    from jarvis.skills.web import SITES
+
+    return SITES.get(name.strip().lower())
+
+
 @intent(
     r"^(?:open|launch|start|run|fire\s+up)\s+(?:the\s+)?(?:app\s+)?(?P<app>.+)$",
     name="open_app",
@@ -110,12 +117,38 @@ def do_open(ctx, app: str = "", **_) -> ActionResult:
     if not app:
         return ActionResult.fail("Open what?")
 
+    # "open chrome and youtube" names two targets. The chain splitter leaves it
+    # alone because "youtube" is not a command verb, and resolving the whole
+    # string fuzzy-matches the first one and then waits for a window called
+    # "chrome and youtube" that will never exist.
+    if " and " in app:
+        parts = [p.strip() for p in app.split(" and ") if p.strip()]
+        if len(parts) > 1 and all(
+            _known_site(p) or resolve_target(p) or find_window(p) for p in parts
+        ):
+            opened = [do_open(ctx, app=p) for p in parts]
+            failed = [r for r in opened if not r.ok]
+            if not failed:
+                return ActionResult(
+                    ok=True,
+                    say=f"Opening {' and '.join(parts)}.",
+                    data={"targets": parts},
+                )
+
     # Already running and visible? Focusing is faster than a cold start.
     window = find_window(app)
     if window is not None:
         focus_window(window)
         ctx.last_target = app
         return ActionResult(ok=True, say=f"{app} is up.")
+
+    site = _known_site(app)
+    if site is not None:
+        from jarvis.skills.web import open_url
+
+        open_url(site)
+        ctx.last_target = app
+        return ActionResult(ok=True, say=f"Opening {app}.", data={"url": site})
 
     target = resolve_target(app)
     if target is None:
@@ -129,11 +162,13 @@ def do_open(ctx, app: str = "", **_) -> ActionResult:
     # `await_window` tells a chained sequence to wait for this window before
     # running the next step -- "open notepad and type hi" must not type into
     # whatever was focused while Notepad was still starting.
-    return ActionResult(
-        ok=True,
-        say=f"Opening {app}.",
-        data={"target": target, "await_window": app},
-    )
+    result = ActionResult(ok=True, say=f"Opening {app}.", data={"target": target})
+    # Only wait for a window when one is actually coming. A protocol handler
+    # (ms-settings:, whatsapp:) opens somebody else's window under a title we
+    # cannot predict, and waiting for it just stalls the next step.
+    if not (target.endswith(":") or "://" in target):
+        result.data["await_window"] = app
+    return result
 
 
 @intent(

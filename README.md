@@ -85,6 +85,13 @@ noise as a phrase.
 Slam the mouse into a screen corner to trigger PyAutoGUI's failsafe and abort
 anything in flight.
 
+**Jarvis hears your speakers, not just you.** With a video playing, its
+dialogue reaches the microphone. Say "Jarvis" and you always get an answer,
+even if it is "I don't know how to that". Speech that *isn't* addressed to it —
+anything in the follow-up window after a command — is obeyed only when it
+clearly matches a command, and ignored in silence otherwise. A film cannot
+drive your desktop, and it cannot fill the HUD with complaints either.
+
 ---
 
 ## What it understands
@@ -108,6 +115,12 @@ move to the other monitor, what apps are open
 **Web** — search for `<x>`, search cats on youtube, play lofi beats, open
 youtube, go to github.com, new tab, close tab, reopen tab, tab 3, refresh, back,
 find pricing on page, bookmark this page, incognito
+
+`play <x>` plays it. There is no URL that opens YouTube's top result directly,
+so the search page is fetched and its first video id read out of the inline
+JSON, then that video is opened. It costs a round trip to YouTube (~2 s, mostly
+their response time) and falls back to the results page if the id can't be
+found.
 
 **System** — volume 40, volume up, mute, pause, next track, screenshot, lock the
 screen, shutdown, restart, sleep, what time is it, battery, system status
@@ -299,7 +312,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 171 tests, ~0.7 s
+python -m pytest tests -q          :: 191 tests, ~0.6 s
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone

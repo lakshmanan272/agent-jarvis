@@ -161,3 +161,50 @@ def test_fuzzy_match_rejects_a_sentence_that_merely_contains_an_app_name():
     # ...while still matching the things it should
     assert best_match("notepad", windows) == "Untitled - Notepad"
     assert best_match("note pad", windows) == "Untitled - Notepad"
+
+
+# --- "open chrome and youtube" stalled for six seconds ---------------------
+# "youtube" is not a command verb so the chain left the phrase whole; the app
+# resolver fuzzy-matched "chrome" out of it and then the chain waited for a
+# window called "chrome and youtube" that was never going to exist.
+
+
+def test_open_with_two_targets_opens_both(router, side_effects, monkeypatch):
+    from jarvis.skills import apps
+
+    monkeypatch.setattr(apps, "find_window", lambda _n: None)
+    opened = []
+    monkeypatch.setattr(apps, "launch", lambda t: opened.append(t) or True)
+    from jarvis.skills import web
+
+    monkeypatch.setattr(web, "open_url", lambda u: opened.append(u))
+
+    result = router.dispatch("open chrome and youtube")
+    assert result.ok
+    assert "chrome" in opened
+    assert any("youtube" in str(o) for o in opened)
+
+
+def test_a_launch_that_opens_no_window_does_not_stall(router, monkeypatch):
+    """A protocol handler opens someone else's window; waiting is pure delay."""
+    from jarvis.skills import apps
+
+    monkeypatch.setattr(apps, "find_window", lambda _n: None)
+    monkeypatch.setattr(apps, "resolve_target", lambda _n: "ms-settings:")
+    monkeypatch.setattr(apps, "launch", lambda _t: True)
+
+    waited = []
+    from jarvis.skills import window
+
+    monkeypatch.setattr(
+        window, "wait_for_window", lambda *a, **k: waited.append(a) or None
+    )
+    result = router.dispatch("open settings and select all")
+    assert result.ok
+    assert waited == [], "a protocol launch has no window to wait for"
+
+
+def test_the_window_wait_is_bounded():
+    from jarvis.core.router import WINDOW_SETTLE_S
+
+    assert WINDOW_SETTLE_S <= 3.0

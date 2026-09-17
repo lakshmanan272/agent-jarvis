@@ -1,12 +1,20 @@
 """Web and browser control: search, open sites, tab management."""
 from __future__ import annotations
 
+import logging
 import re
 import urllib.parse
 import webbrowser
 
 from jarvis.core import actuator as act
 from jarvis.skills.base import ActionResult, intent
+
+log = logging.getLogger("jarvis.skills.web")
+
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 SEARCH_ENGINES = {
     "google": "https://www.google.com/search?q={q}",
@@ -57,6 +65,50 @@ def open_url(url: str) -> None:
     webbrowser.open(url, new=2, autoraise=True)
 
 
+# YouTube embeds every result's id in the search page as "videoId":"...".
+_VIDEO_ID = re.compile(r'"videoId":"([\w-]{11})"')
+
+
+def first_youtube_video(query: str, timeout: float = 4.0) -> str | None:
+    """The id of the first result for `query`, or None if it can't be found.
+
+    "Play X" should play X, not present a page of things that might be X. There
+    is no URL that opens the top result directly, so the search page is fetched
+    and its first video id read out of the inline JSON -- no API key, no
+    scraping library. The response is streamed and abandoned at the first match
+    rather than downloaded whole: the id turns up in the first few hundred
+    kilobytes of a page that runs to megabytes.
+
+    Failure is not an error. The caller falls back to opening the search
+    results, which is where this started.
+    """
+    try:
+        import httpx
+
+        with httpx.stream(
+            "GET",
+            "https://www.youtube.com/results",
+            params={"search_query": query},
+            timeout=timeout,
+            follow_redirects=True,
+            # Without a browser agent YouTube serves a consent interstitial
+            # that carries no results.
+            headers={"User-Agent": _BROWSER_UA, "Accept-Language": "en-US,en;q=0.9"},
+        ) as response:
+            response.raise_for_status()
+            window = ""
+            for chunk in response.iter_text():
+                window += chunk
+                match = _VIDEO_ID.search(window)
+                if match:
+                    return match.group(1)
+                # Keep only enough tail to catch an id split across chunks.
+                window = window[-64:]
+    except Exception as exc:
+        log.debug("could not resolve a video for %r: %s", query, exc)
+    return None
+
+
 @intent(
     r"^(?:search|google|look\s*up)\s+(?:for\s+)?(?P<query>.+?)"
     r"(?:\s+on\s+(?P<engine>google|youtube|bing|duckduckgo|github|wikipedia|"
@@ -89,8 +141,15 @@ def do_play(ctx, query: str = "", **_) -> ActionResult:
     query = (query or "").strip()
     if not query:
         return ActionResult.fail("Play what?")
+    video = first_youtube_video(query)
+    if video:
+        open_url(f"https://www.youtube.com/watch?v={video}")
+        return ActionResult(ok=True, say=f"Playing {query}.", data={"video": video})
+    # Could not resolve one; show the results rather than nothing.
     open_url(SEARCH_ENGINES["youtube"].format(q=urllib.parse.quote_plus(query)))
-    return ActionResult(ok=True, say=f"Playing {query}.")
+    return ActionResult(
+        ok=True, say=f"Here are results for {query}.", detail="no single match"
+    )
 
 
 @intent(

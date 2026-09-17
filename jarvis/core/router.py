@@ -22,6 +22,9 @@ log = logging.getLogger("jarvis.router")
 _YES = ("yes", "yeah", "yep", "yup", "confirm", "do it", "go ahead", "sure", "ok", "okay")
 _NO = ("no", "nope", "cancel", "stop", "abort", "never mind", "nevermind", "don't")
 
+# How long a chained step waits for the window the previous step launched.
+WINDOW_SETTLE_S = 2.5
+
 
 class Router:
     def __init__(self, ctx: Context, brain=None) -> None:
@@ -44,6 +47,20 @@ class Router:
         if len(steps) > 1:
             return self._dispatch_chain(steps)
         return self._dispatch_one(steps[0] if steps else raw, _from_brain)
+
+    def can_handle(self, raw: str) -> bool:
+        """Would this phrase reach a real command? A pattern sweep, no side effects.
+
+        Used to decide whether unaddressed speech deserves a reply. Jarvis
+        listens through the speakers as well as to the user, so during a
+        follow-up window a playing video's dialogue arrives looking exactly
+        like a command attempt.
+        """
+        for step in split_commands(raw):
+            text = normalize(step)
+            if text and any(i.match(text) for i in self._intents):
+                return True
+        return False
 
     def _dispatch_chain(self, steps: list[str]) -> ActionResult:
         """Run a sequence, stopping at the first step that fails.
@@ -109,8 +126,11 @@ class Router:
             return
         from jarvis.skills.window import wait_for_window
 
-        if wait_for_window(pending_window, timeout=6.0) is None:
-            log.warning("window %r never appeared", pending_window)
+        # Short on purpose. This is the cost paid when an app opens under a
+        # title we did not predict, and it is pure latency: six seconds of it
+        # turned "open chrome and youtube / play a song" into a 6.2 s command.
+        if wait_for_window(pending_window, timeout=WINDOW_SETTLE_S) is None:
+            log.debug("window %r never appeared; continuing", pending_window)
 
     def _dispatch_one(self, raw: str, _from_brain: bool = False) -> ActionResult:
         started = time.perf_counter()

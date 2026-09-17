@@ -169,9 +169,23 @@ class Engine:
             self.wake(silent=True)
             if not phrase.strip():
                 return  # bare "Jarvis" is just a wake, not a command
-        elif not (self._is_awake or self.config.speech.always_on):
+            # Addressed by name: always answer, even to say we cannot.
+            self.submit(phrase, source="voice")
             return
-        self.submit(phrase if heard else text, source="voice")
+
+        if not (self._is_awake or self.config.speech.always_on):
+            return
+
+        # Unaddressed speech inside the follow-up window. The microphone hears
+        # the speakers too, so a playing video's dialogue arrives here looking
+        # like a command attempt. Acting only on phrases that actually match
+        # something keeps a film from driving the desktop, and staying silent
+        # about the rest keeps it from filling the HUD with "I don't know how
+        # to ..." for every line of it.
+        if not self.router.can_handle(text):
+            log.debug("ignoring unaddressed speech: %r", text)
+            return
+        self.submit(text, source="voice")
 
     # --- command in --------------------------------------------------------
 
