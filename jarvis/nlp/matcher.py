@@ -26,6 +26,17 @@ _JARVIS = re.compile(r"\b(hey |ok |okay )?jarvis\b[,:]?")
 _PUNCT = re.compile(r"[^\w\s%+\-./:@\']")
 _SPACES = re.compile(r"\s+")
 
+# The same two things, but anchored at the start of the phrase only. `normalize`
+# strips filler and the wake word *everywhere*, which is right for recognising a
+# command and wrong for the text the command carries: "type Just Do It" must not
+# become "type do it". `light_clean` therefore trims only the lead-in.
+_LEADING_JARVIS = re.compile(r"^\s*(?:hey\s+|ok(?:ay)?\s+)?jarvis\b[\s,:.]*", re.IGNORECASE)
+_LEADING_FILLER = re.compile(
+    r"^\s*(?:please|kindly|could you|can you|would you|i want you to|i want to|"
+    r"i need you to|just|now|uh+|um+|er+|okay|ok)\b[\s,]*",
+    re.IGNORECASE,
+)
+
 # Recognisers spell digits out; commands read better with numerals.
 _NUMBER_WORDS = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
@@ -76,6 +87,34 @@ def normalize(text: str) -> str:
     text = " ".join(words)
     text = _JARVIS.sub(" ", text)
     text = _FILLER.sub(" ", text)
+    return _SPACES.sub(" ", text).strip()
+
+
+def strip_lead_in(text: str) -> str:
+    """Remove only a leading wake word, leaving every other word untouched.
+
+    The least destructive of the three cleaners. It exists for answers to a
+    yes/no prompt, where "ok" and "okay" are the answer rather than the filler
+    that `normalize` and `light_clean` are entitled to throw away.
+    """
+    return _LEADING_JARVIS.sub("", text.strip(), count=1).strip()
+
+
+def light_clean(text: str) -> str:
+    """Trim only the lead-in, preserving the phrase's own words verbatim.
+
+    Used to recover the payload of commands that carry literal text -- what to
+    type, what to search for, what to name a file. `normalize` is destructive by
+    design (it lowercases, folds "five" to "5", drops politeness and the wake
+    word anywhere in the phrase) which is exactly wrong for that payload.
+    """
+    text = unicodedata.normalize("NFKC", text).strip()
+    text = _LEADING_JARVIS.sub("", text, count=1)
+    while True:  # "could you please just ..." stacks several
+        trimmed = _LEADING_FILLER.sub("", text, count=1)
+        if trimmed == text:
+            break
+        text = trimmed
     return _SPACES.sub(" ", text).strip()
 
 

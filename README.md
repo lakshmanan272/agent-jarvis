@@ -47,8 +47,28 @@ installs dependencies and starts the agent.
 | Voice | Say **"Jarvis"**, then your command. Follow-ups need no wake word for 12 s. |
 | Voice (hands-free) | `python -m jarvis --always-on` acts on every phrase. |
 | Hotkey | `Ctrl+Alt+J` wakes it without speaking a wake word. |
-| Text | Type into the HUD box at the bottom right and press Enter. |
+| Text | Click the orb, type into the bar that opens, press Enter. |
 | One-shot | `python -m jarvis open chrome` runs a single command and exits. |
+
+### The orb
+
+Double-click **`run.bat`** and a small glowing reactor orb docks to the edge of
+your screen — a real circle, not a square window, because Windows lets a layered
+window key one colour out to fully transparent. It is always on top of whatever
+you are working in, and its colour is the agent's state: dim teal idle, bright
+cyan listening, violet acting, green speaking, red muted.
+
+| On the orb | Does |
+| --- | --- |
+| Click | Opens the command bar; click again to collapse it |
+| Drag | Moves the orb; the bar follows |
+| Right-click | Menu: open console, mute, exit |
+
+The bar shows what was heard, what happened, and how long it took, with a text
+box for typing commands. It also pops open by itself whenever a command actually
+succeeds, so a spoken command still gives you something to look at. It stays
+shut for failed voice commands, which are usually the mic mishearing a stray
+noise as a phrase.
 
 | Hotkey | Does |
 | --- | --- |
@@ -148,7 +168,8 @@ writes `%USERPROFILE%\.jarvis\config.json`. Useful knobs:
   "control": {
     "confirm_destructive": true,   // ask before shutdown / delete / run command
     "failsafe": true,              // mouse to a corner aborts
-    "paste_threshold": 24          // text longer than this pastes instead of typing
+    "paste_threshold": 12,         // text longer than this pastes instead of typing
+    "type_interval_s": 0.01        // 0 drops keystrokes in Electron/WebView apps
   },
   "brain": { "enabled": false }    // the optional LLM fallback
 }
@@ -198,6 +219,12 @@ Patterns are matched against **normalised** text: lower case, no punctuation,
 filler words and the wake word already stripped, spelled-out numbers converted
 to digits. Write them plainly and skip the politeness.
 
+If a captured group is literal content the user dictated — text to type, a
+search query, a filename — pass `verbatim=True`. The router then re-extracts the
+groups from the original phrasing, so `type Just Do It` types `Just Do It`
+rather than the normaliser's `do it`. Control words stay non-verbatim, because
+they *want* the normalising (`press tab three times` → `3`).
+
 Return `needs_confirm="..."` instead of acting to make a command ask first; the
 handler is re-invoked with `_confirmed=True` on a spoken "yes".
 
@@ -213,21 +240,30 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
   executes its own replies.
 - Repeat counts are capped (50 key presses, 200 selection steps) so a misheard
   number can't run away.
+- `create folder`/`create file` with no location land on the Desktop, never in
+  Jarvis's own install directory.
+- `delete file` removes permanently — it does not go to the Recycle Bin.
 
 ---
 
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 88 tests, ~0.3 s
+python -m pytest tests -q          :: 117 tests, ~0.8 s
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone
 ruff check jarvis tests
 ```
 
-Tests patch the actuator module-wide, so a failing test can never type into
-whatever window happens to be focused.
+`tests/conftest.py` stubs out every side-effecting exit from the package —
+mouse, keyboard, `subprocess`, `os.startfile`, `webbrowser` — autouse, for the
+whole suite. Tests assert on what *would* have been executed.
+
+This is not belt-and-braces. Jarvis's handlers really do shut Windows down and
+really do delete files, and during development a confirmation test dispatched
+`shutdown the computer` followed by `yes` and powered the machine off mid-run.
+A test for a destructive command asserts on the recorded call, never a real one.
 
 ```
 jarvis/

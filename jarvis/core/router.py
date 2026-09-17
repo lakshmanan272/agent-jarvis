@@ -9,15 +9,17 @@ from __future__ import annotations
 import logging
 import time
 
-from jarvis.nlp.matcher import normalize
+from jarvis.nlp.matcher import light_clean, normalize, strip_lead_in
 from jarvis.skills import load_all_skills
 from jarvis.skills.base import REGISTRY, ActionResult, Context, Intent
 
 log = logging.getLogger("jarvis.router")
 
-# Spoken affirmations that resolve a pending confirmation.
-_YES = {"yes", "yeah", "yep", "confirm", "do it", "go ahead", "sure", "ok", "okay"}
-_NO = {"no", "nope", "cancel", "stop", "abort", "never mind", "nevermind"}
+# Spoken affirmations that resolve a pending confirmation. Matched against the
+# raw phrase, not the normalised one: `normalize` treats "okay" as filler and
+# would erase the entire answer.
+_YES = ("yes", "yeah", "yep", "yup", "confirm", "do it", "go ahead", "sure", "ok", "okay")
+_NO = ("no", "nope", "cancel", "stop", "abort", "never mind", "nevermind", "don't")
 
 
 class Router:
@@ -35,48 +37,79 @@ class Router:
     def intents(self) -> list[Intent]:
         return self._intents
 
-    def dispatch(self, raw: str) -> ActionResult:
+    def dispatch(self, raw: str, _from_brain: bool = False) -> ActionResult:
         started = time.perf_counter()
         text = normalize(raw)
-        if not text:
-            return ActionResult.fail("I didn't catch that.")
 
         pending = self.ctx.pending_confirm
         if pending is not None:
             self.ctx.pending_confirm = None
-            if text in _YES or any(text.startswith(y) for y in _YES):
-                return self._finish(pending(), text, started)
-            if text in _NO or any(text.startswith(n) for n in _NO):
-                return self._finish(ActionResult(ok=True, say="Cancelled."), text, started)
+            # Matched against the barely-touched phrase: "ok" and "okay" are
+            # filler words everywhere else, so both `normalize` and
+            # `light_clean` erase them -- and erasing the answer to "are you
+            # sure?" would silently drop the user's "okay".
+            answer = strip_lead_in(raw).strip(" .,!?").lower()
+            if answer.startswith(_YES):
+                return self._finish(pending(), text, started, "confirm")
+            if answer.startswith(_NO):
+                return self._finish(
+                    ActionResult(ok=True, say="Cancelled."), text, started, "confirm"
+                )
             # Anything else: treat the confirmation as declined and route normally.
+
+        if not text:
+            return self._finish(
+                ActionResult.fail("I didn't catch that."), text, started
+            )
 
         for intent in self._intents:
             match = intent.match(text)
             if match is None:
                 continue
+            kwargs = self._kwargs_for(intent, match, raw)
+            # Handlers may inspect the command they were invoked for, so this
+            # has to be set before the call, not after it in `_finish`.
+            self.ctx.last_command = text
             try:
-                result = intent.handler(self.ctx, **_kwargs(match))
+                result = intent.handler(self.ctx, **kwargs)
             except Exception as exc:
                 log.exception("intent %s failed", intent.name)
                 result = ActionResult.fail(
                     "That didn't work.", f"{intent.name}: {exc.__class__.__name__}: {exc}"
                 )
             if result.needs_confirm:
-                self.ctx.pending_confirm = lambda i=intent, m=match: i.handler(
-                    self.ctx, _confirmed=True, **_kwargs(m)
+                self.ctx.pending_confirm = lambda i=intent, k=kwargs: i.handler(
+                    self.ctx, _confirmed=True, **k
                 )
                 result = ActionResult(ok=True, say=result.needs_confirm)
             return self._finish(result, text, started, intent.name)
 
-        if self.brain is not None and self.brain.available:
+        # The brain only ever rewrites a phrase into a command we already have,
+        # so its output gets one pass through the router and no second opinion:
+        # without this guard a rewrite that also misses would loop back here.
+        if not _from_brain and self.brain is not None and self.brain.available:
             plan = self.brain.plan(text, self._intents)
             if plan:
                 log.info("brain resolved %r -> %r", text, plan)
-                return self.dispatch(plan)
+                return self.dispatch(plan, _from_brain=True)
 
         return self._finish(
             ActionResult.fail(f"I don't know how to {text}."), text, started
         )
+
+    def _kwargs_for(self, intent: Intent, match, raw: str) -> dict:
+        """Handler arguments, taken from the original phrasing where it matters.
+
+        For a `verbatim` intent the same pattern is re-run against lightly
+        cleaned text, which keeps capitalisation, spelled-out numbers and words
+        like "please" that `normalize` would otherwise strip out of the payload.
+        If that second match fails the normalised groups still apply, so a
+        command never breaks outright over this.
+        """
+        if not intent.verbatim:
+            return _kwargs(match)
+        literal = intent.match(light_clean(raw))
+        return _kwargs(literal) if literal is not None else _kwargs(match)
 
     def _finish(
         self, result: ActionResult, text: str, started: float, intent: str = "-"

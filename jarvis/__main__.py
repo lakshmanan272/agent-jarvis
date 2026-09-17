@@ -154,7 +154,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command:
         return run_once(cfg, args.command)
 
-    print(BANNER.format(ptt=cfg.hotkeys.push_to_talk, stop=cfg.hotkeys.panic_stop))
+    if sys.stdout is not None:  # absent under pythonw, the silent launch path
+        print(BANNER.format(ptt=cfg.hotkeys.push_to_talk, stop=cfg.hotkeys.panic_stop))
 
     from jarvis.core.engine import Engine
 

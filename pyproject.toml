@@ -11,6 +11,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "pyautogui>=0.9.54",
+    "Pillow>=11.0",
     "pygetwindow>=0.0.9",
     "pyperclip>=1.9.0",
     "psutil>=6.1.0",

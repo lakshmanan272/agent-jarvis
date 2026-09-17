@@ -1,45 +1,11 @@
 """Routing tests: does a phrase reach the intent a user would expect?
 
-These never touch the real mouse or keyboard — `actuator` is patched module-wide
-so a failing test can't type into whatever window happens to be focused.
+Nothing here touches the real machine: tests/conftest.py stubs out the mouse,
+the keyboard, and every process/browser/shutdown call, autouse for the suite.
 """
 from __future__ import annotations
 
 import pytest
-
-from jarvis.config import Config
-from jarvis.core.router import Router
-from jarvis.skills.base import Context
-
-
-@pytest.fixture(autouse=True)
-def no_real_input(monkeypatch):
-    """Replace every actuator primitive with a recording stub."""
-    from jarvis.core import actuator
-
-    calls: list[tuple[str, tuple, dict]] = []
-
-    for name in (
-        "click", "move", "move_relative", "drag_to", "scroll", "press",
-        "hotkey", "type_text", "mouse_down", "mouse_up", "write_clipboard",
-    ):
-        monkeypatch.setattr(
-            actuator,
-            name,
-            lambda *a, _n=name, **k: calls.append((_n, a, k)),
-        )
-    monkeypatch.setattr(actuator, "screen_size", lambda: (1920, 1080))
-    monkeypatch.setattr(actuator, "position", lambda: (0, 0))
-    monkeypatch.setattr(actuator, "read_clipboard", lambda: "sample text")
-    return calls
-
-
-@pytest.fixture
-def router():
-    ctx = Context(config=Config(), speak=lambda _t: None)
-    r = Router(ctx)
-    ctx.variables["router"] = r
-    return r
 
 
 def route(router, phrase: str) -> str:

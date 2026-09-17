@@ -169,6 +169,7 @@ def do_join_lines(ctx, **_) -> ActionResult:
 @intent(
     r"^replace\s+(?P<old>.+?)\s+with\s+(?P<new>.+)$",
     name="find_replace",
+    verbatim=True,
     priority=8,
     description="Find and replace within the selection",
 )
@@ -179,6 +180,7 @@ def do_replace(ctx, old: str = "", new: str = "", **_) -> ActionResult:
 @intent(
     r"^(?:spell|spell\s+out)\s+(?P<word>\w+)$",
     name="spell_word",
+    verbatim=True,
     priority=8,
     description="Type a word letter by letter",
 )

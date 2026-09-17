@@ -45,8 +45,12 @@ class ControlConfig:
     # pyautogui pause between primitives. 0 = as fast as the OS accepts.
     action_pause_s: float = 0.0
     move_duration_s: float = 0.0      # instant cursor teleport
-    type_interval_s: float = 0.0      # instant typing via clipboard paste
-    paste_threshold: int = 24         # text longer than this pastes instead of types
+    # Not zero: Electron/WebView apps (VS Code, the new Notepad, Slack) drop
+    # keystrokes fed faster than their renderer polls, and a swallowed space is
+    # worse than 10 ms. Anything longer than `paste_threshold` skips typing
+    # entirely and goes through the clipboard, which is O(1) and exact.
+    type_interval_s: float = 0.01
+    paste_threshold: int = 12
     failsafe: bool = True             # slam mouse to a corner to abort
     confirm_destructive: bool = True  # ask before shutdown / close-all / delete
 

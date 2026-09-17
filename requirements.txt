@@ -1,5 +1,9 @@
 # --- core automation (fast, native) ---
 pyautogui==0.9.54
+# PyScreeze (pyautogui's screenshot backend) imports Pillow lazily and doesn't
+# always pull it in transitively -- pin it explicitly or `screenshot` silently
+# fails with "PyAutoGUIException: unable to import pyscreeze".
+Pillow==11.0.0
 pydirectinput==1.0.4
 pygetwindow==0.0.9
 pyperclip==1.9.0

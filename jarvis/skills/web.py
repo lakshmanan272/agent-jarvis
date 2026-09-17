@@ -63,6 +63,7 @@ def open_url(url: str) -> None:
     r"maps|amazon|stack overflow|chatgpt|claude))?$",
     r"^search\s+(?P<engine>youtube|github|amazon|maps|wikipedia)\s+for\s+(?P<query>.+)$",
     name="web_search",
+    verbatim=True,
     priority=8,
     description="Search the web",
     examples=("search for python decorators", "search cats on youtube"),
@@ -79,6 +80,7 @@ def do_search(ctx, query: str = "", engine: str | None = None, **_) -> ActionRes
 @intent(
     r"^(?:play)\s+(?P<query>.+?)(?:\s+on\s+youtube)?$",
     name="play_youtube",
+    verbatim=True,
     priority=7,
     description="Play something on YouTube",
     examples=("play lofi beats", "play interstellar soundtrack on youtube"),
@@ -94,6 +96,7 @@ def do_play(ctx, query: str = "", **_) -> ActionResult:
 @intent(
     r"^(?:open|go\s+to|visit|browse)\s+(?P<site>[\w.\-/:]+\.[\w\-/:.?=&%#]+)$",
     name="open_url",
+    verbatim=True,
     priority=9,
     description="Open a URL",
     examples=("open github.com", "go to news.ycombinator.com"),
@@ -189,6 +192,7 @@ def do_forward(ctx, **_) -> ActionResult:
     r"^(?:find|search)\s+(?P<query>.+?)\s+(?:on|in)\s+(?:this\s+)?page$",
     r"^find\s+in\s+page\s+(?P<query>.+)$",
     name="find_in_page",
+    verbatim=True,
     priority=9,
     description="Ctrl+F for a phrase on the current page",
 )

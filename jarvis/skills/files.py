@@ -31,16 +31,28 @@ def resolve_dir(name: str) -> Path | None:
     return None
 
 
+def default_dir() -> Path:
+    """Where "create folder reports" lands when no location is spoken.
+
+    The Desktop, not the working directory -- Jarvis is normally launched from
+    its own install folder or from a shortcut, and silently creating the user's
+    files inside the application directory is never what they meant.
+    """
+    desktop = KNOWN_DIRS["desktop"]
+    return desktop if desktop.is_dir() else Path.home()
+
+
 @intent(
     r"^(?:create|make|new)\s+(?:a\s+)?folder\s+(?:called\s+|named\s+)?(?P<name>.+?)"
     r"(?:\s+(?:in|on)\s+(?P<where>.+))?$",
     name="create_folder",
+    verbatim=True,
     priority=8,
     description="Create a folder",
     examples=("create folder reports on desktop",),
 )
 def do_create_folder(ctx, name: str = "", where: str | None = None, **_) -> ActionResult:
-    parent = resolve_dir(where) if where else Path.cwd()
+    parent = resolve_dir(where) if where else default_dir()
     if parent is None:
         return ActionResult.fail(f"Can't find {where}.")
     target = parent / name.strip()
@@ -55,11 +67,12 @@ def do_create_folder(ctx, name: str = "", where: str | None = None, **_) -> Acti
     r"^(?:create|make|new)\s+(?:a\s+)?file\s+(?:called\s+|named\s+)?(?P<name>[\w.\- ]+?)"
     r"(?:\s+(?:in|on)\s+(?P<where>.+))?$",
     name="create_file",
+    verbatim=True,
     priority=8,
     description="Create an empty file",
 )
 def do_create_file(ctx, name: str = "", where: str | None = None, **_) -> ActionResult:
-    parent = resolve_dir(where) if where else Path.cwd()
+    parent = resolve_dir(where) if where else default_dir()
     if parent is None:
         return ActionResult.fail(f"Can't find {where}.")
     target = parent / name.strip().replace(" ", "_")
@@ -88,12 +101,15 @@ def do_open_folder(ctx, name: str = "", **_) -> ActionResult:
 @intent(
     r"^(?:delete|remove|trash)\s+(?:the\s+)?(?:file|folder)\s+(?P<path>.+)$",
     name="delete_path",
+    verbatim=True,
     priority=8,
     description="Delete a file or folder",
     destructive=True,
 )
 def do_delete_path(ctx, path: str = "", _confirmed: bool = False, **_) -> ActionResult:
     target = Path(path.strip()).expanduser()
+    if not target.is_absolute():
+        target = default_dir() / target
     if not target.exists():
         return ActionResult.fail(f"{target.name} isn't there.")
     if not _confirmed and ctx.config.control.confirm_destructive:
@@ -110,6 +126,7 @@ def do_delete_path(ctx, path: str = "", _confirmed: bool = False, **_) -> Action
 @intent(
     r"^(?:find|search\s+for)\s+(?:the\s+)?(?:file|files|folder)s?\s+(?P<query>.+)$",
     name="search_files",
+    verbatim=True,
     priority=9,
     description="Search files with Windows Search",
 )
@@ -125,6 +142,7 @@ def do_search_files(ctx, query: str = "", **_) -> ActionResult:
     r"^(?:open|start)\s+(?:the\s+)?(?:windows\s+)?search$",
     r"^search\s+(?:in\s+)?windows\s+(?:for\s+)?(?P<query>.+)$",
     name="windows_search",
+    verbatim=True,
     priority=8,
     description="Open the Start-menu search, optionally with a query",
 )
@@ -153,6 +171,7 @@ def do_read_clipboard(ctx, **_) -> ActionResult:
 @intent(
     r"^(?:run|execute)\s+command\s+(?P<command>.+)$",
     name="run_command",
+    verbatim=True,
     priority=9,
     description="Run a shell command in a visible terminal",
     destructive=True,

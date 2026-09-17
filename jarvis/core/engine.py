@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 
-from jarvis.bus import BUS, COMMAND, ERROR, HEARD, RESULT, SAY, STATE
+from jarvis.bus import BUS, COMMAND, ERROR, FOCUS_CONSOLE, HEARD, RESULT, SAY, STATE
 from jarvis.core import actuator as act
 from jarvis.core.router import Router
 from jarvis.nlp.brain import Brain
@@ -33,7 +33,7 @@ INSTANT_COMMANDS = frozenset(
         "click", "double click", "right click", "middle click",
         "scroll up", "scroll down", "scroll left", "scroll right",
         "copy", "paste", "cut", "undo", "redo", "save", "stop",
-        "enter", "back", "forward", "refresh", "new tab", "close tab",
+        "back", "forward", "refresh", "new tab", "close tab",
         "next tab", "previous tab", "select all", "minimize", "maximize",
         "mute", "pause", "play", "next track", "screenshot", "tab", "space",
         "new line", "delete", "yes", "no",
@@ -62,7 +62,8 @@ class Engine:
         self._awake_until = 0.0
         self._last_dispatch = ""
         self._last_dispatch_at = 0.0
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()          # guards the duplicate check
+        self._dispatch_lock = threading.Lock()  # serialises actual execution
         self._running = threading.Event()
         self._state = "idle"
 
@@ -129,6 +130,7 @@ class Engine:
             hk.push_to_talk: self.wake,
             hk.panic_stop: self.panic,
             hk.toggle_mute: self.toggle_mute,
+            hk.text_console: self.show_console,
         }
         for combo, fn in bindings.items():
             try:
@@ -181,13 +183,17 @@ class Engine:
         BUS.emit(COMMAND, {"text": text, "source": source})
         self._set_state("acting")
         act.clear_abort()
-        try:
-            result = self.router.dispatch(text)
-        except InterruptedError:
-            result = ActionResult(ok=True, say="Stopped.")
-        except Exception as exc:
-            log.exception("dispatch blew up")
-            result = ActionResult.fail("Something went wrong.", str(exc))
+        # Serialised deliberately: speech arrives on the decoder thread while
+        # typed commands arrive on the UI thread, and two handlers driving the
+        # keyboard at once would interleave their keystrokes into one another.
+        with self._dispatch_lock:
+            try:
+                result = self.router.dispatch(text)
+            except InterruptedError:
+                result = ActionResult(ok=True, say="Stopped.")
+            except Exception as exc:
+                log.exception("dispatch blew up")
+                result = ActionResult.fail("Something went wrong.", str(exc))
 
         # Only remember commands that worked, so "repeat" can't replay a typo.
         if result.ok and result.data.get("intent") != "repeat":
@@ -252,6 +258,10 @@ class Engine:
         muted = not self._muted
         self.ctx.variables["muted"] = muted
         self._set_state("muted" if muted else "idle")
+
+    def show_console(self) -> None:
+        """Ask the UI to reveal the text bar. A no-op headless (nothing listens)."""
+        BUS.emit(FOCUS_CONSOLE)
 
     # --- state -------------------------------------------------------------
 

@@ -106,6 +106,7 @@ def do_drag(ctx, x: str = "0", y: str = "0", **_) -> ActionResult:
 @intent(
     r"^(?:type|write|enter|input)\s+(?P<text>.+)$",
     name="type_text",
+    verbatim=True,
     priority=1,
     description="Type text into the focused field",
     examples=("type hello world", "write my name is arun"),

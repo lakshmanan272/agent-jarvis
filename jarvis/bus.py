@@ -50,3 +50,4 @@ COMMAND = "command"        # a dispatched command string
 RESULT = "result"          # ActionResult
 SAY = "say"                # text to speak
 ERROR = "error"
+FOCUS_CONSOLE = "focus_console"  # request: reveal the text bar and focus it

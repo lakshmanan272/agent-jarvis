@@ -11,6 +11,15 @@ if not exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :nodeps
 )
 
+rem Plain double-click, no arguments: launch silently via pythonw so nothing
+rem but the Jarvis orb appears on screen -- no console window left behind.
+if "%~1"=="" (
+    start "" ".venv\Scripts\pythonw.exe" -m jarvis
+    goto :eof
+)
+
+rem Called with arguments (a one-shot command, --list, --benchmark, etc.):
+rem keep the console so the output is actually visible.
 ".venv\Scripts\python.exe" -m jarvis %*
 goto :eof
 

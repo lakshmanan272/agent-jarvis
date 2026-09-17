@@ -44,6 +44,11 @@ class Intent:
     description: str = ""
     examples: tuple[str, ...] = ()
     destructive: bool = False
+    # True when a captured group is literal content the user dictated (text to
+    # type, a search query, a filename) rather than a control word. The router
+    # then re-extracts the groups from lightly-cleaned text so capitalisation,
+    # numbers and ordinary words like "please" survive intact.
+    verbatim: bool = False
 
     def match(self, text: str) -> re.Match[str] | None:
         for pattern in self.patterns:
@@ -63,12 +68,17 @@ def intent(
     description: str = "",
     examples: tuple[str, ...] = (),
     destructive: bool = False,
+    verbatim: bool = False,
 ) -> Callable[[Handler], Handler]:
     """Register a handler for one or more regex patterns.
 
     Patterns are matched case-insensitively against normalised text (lowercase,
     punctuation stripped, filler words removed) — so write them in plain lower
     case with no trailing punctuation.
+
+    Set `verbatim=True` when a captured group is literal content the user
+    dictated. The router then feeds the handler groups taken from the original
+    phrasing, so "type Just Do It" types `Just Do It` and not `do it`.
     """
 
     def decorator(fn: Handler) -> Handler:
@@ -83,6 +93,7 @@ def intent(
                 else description,
                 examples=examples,
                 destructive=destructive,
+                verbatim=verbatim,
             )
         )
         return fn

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import sys
 
 from jarvis.config import USER_DIR
 
@@ -24,7 +25,10 @@ def setup(level: str = "INFO", console: bool = True) -> None:
     )
     root.addHandler(file_handler)
 
-    if console:
+    # Under pythonw (the silent double-click launch) there is no console at
+    # all: sys.stderr is None, and handing that to StreamHandler crashes the
+    # first time anything logs. Skip it there; the file handler still runs.
+    if console and sys.stderr is not None:
         stream = logging.StreamHandler()
         stream.setLevel(getattr(logging, level.upper(), logging.INFO))
         stream.setFormatter(logging.Formatter("%(levelname)-7s %(name)-16s %(message)s"))
