@@ -12,15 +12,25 @@ USER_DIR = Path(os.environ.get("JARVIS_HOME", Path.home() / ".jarvis"))
 MODEL_DIR = USER_DIR / "models"
 CONFIG_PATH = USER_DIR / "config.json"
 
-# Vosk small English model: ~40 MB, streaming, ~50 ms decode on CPU.
-VOSK_SMALL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+# Offline English models, both streaming. "fast" loads in half a second and is
+# enough for short commands in a quiet room; "accurate" is a wider-graph model
+# that mishears far less with background noise or an accent, at a larger
+# one-time download and about three times the memory.
+SPEECH_MODELS = {
+    "fast": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
+    "accurate": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip",
+}
+VOSK_SMALL_URL = SPEECH_MODELS["fast"]  # kept for callers that import it by name
 
 
 @dataclass
 class SpeechConfig:
     enabled: bool = True
     engine: str = "vosk"              # "vosk" | "none"
-    model_url: str = VOSK_SMALL_URL
+    # "fast" (~40 MB) or "accurate" (~128 MB). Switching re-downloads once.
+    accuracy: str = "fast"
+    # Set to override `accuracy` with any Vosk model archive URL.
+    model_url: str = ""
     sample_rate: int = 16000
     block_ms: int = 30                # audio chunk size fed to the recogniser
     device: int | None = None         # input device index, None = default mic
@@ -33,6 +43,12 @@ class SpeechConfig:
     # because it is tuned for dictation; for commands this is the single
     # biggest slice of end-to-end latency. Raise it if words get cut off.
     endpoint_silence_ms: int = 180
+
+    def resolve_model_url(self) -> str:
+        """The archive to fetch: an explicit override, else the accuracy tier."""
+        return self.model_url or SPEECH_MODELS.get(
+            self.accuracy, SPEECH_MODELS["fast"]
+        )
 
 
 @dataclass

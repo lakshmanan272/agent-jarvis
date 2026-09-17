@@ -24,6 +24,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 
 from jarvis.bus import BUS, COMMAND, ERROR, FOCUS_CONSOLE, HEARD, RESULT, STATE
+from jarvis.core import focus
 
 log = logging.getLogger("jarvis.hud")
 
@@ -249,6 +250,11 @@ class HUD:
         self._bar_visible = False
         self._user_moved_bar = False
         self._last_source = ""
+        # The window the bar took the keyboard from, owed it back.
+        self._displaced: int | None = None
+        # Runs on the engine's thread immediately before a command is
+        # dispatched, whether it arrived by voice or by typing.
+        engine.before_dispatch = self.release_focus
 
         BUS.on(STATE, lambda s: self._ui(self._set_state, s))
         BUS.on(HEARD, lambda p: self._ui(self._set_heard, p))
@@ -266,15 +272,42 @@ class HUD:
         log.debug("toggle_bar, currently visible=%s", self._bar_visible)
         self.hide_bar() if self._bar_visible else self.show_bar()
 
-    def show_bar(self) -> None:
-        log.debug("show_bar")
+    def show_bar(self, take_focus: bool = True) -> None:
+        """Reveal the command bar.
+
+        `take_focus` is False when the bar opens by itself to report something,
+        because a status message must never pull the keyboard out of whatever
+        the user is working in.
+        """
+        log.debug("show_bar take_focus=%s", take_focus)
         if not self._user_moved_bar:
             self.reposition_bar()
         self.bar.deiconify()
         self.bar.lift()
         self.bar.attributes("-topmost", True)
-        self.entry.focus_force()
+        if take_focus:
+            # Remember what we are displacing so `release_focus` can put it
+            # back before any command runs. Without this, "type hello" types
+            # into this very entry box.
+            displaced = focus.foreground()
+            if displaced is not None and not focus.is_ours(displaced):
+                self._displaced = displaced
+                log.debug("displacing %r", focus.title(displaced))
+            self.entry.focus_force()
         self._bar_visible = True
+
+    def release_focus(self) -> None:
+        """Hand the keyboard back to whatever the bar displaced.
+
+        Called synchronously before a command is dispatched, from whichever
+        thread is about to run it — commands act on the window the user was
+        using, not on Jarvis.
+        """
+        if self._displaced is None:
+            return
+        restored = focus.restore(self._displaced)
+        log.debug("release_focus to %r -> %s", focus.title(self._displaced), restored)
+        self._displaced = None
 
     def toggle_voice(self) -> None:
         """Mute or unmute the microphone from the bar.
@@ -372,11 +405,11 @@ class HUD:
         # phrase ("yeah", "the"...) -- surfacing that would make the bar snap
         # back open right after the user closes it, on every stray sound.
         if not self._bar_visible and (result.ok or self._last_source != "voice"):
-            self.show_bar()
+            self.show_bar(take_focus=False)
 
     def _set_error(self, message: str) -> None:
         self.status.config(text=str(message), fg=BAD)
-        self.show_bar()
+        self.show_bar(take_focus=False)
 
     # --- input ---------------------------------------------------------------
 

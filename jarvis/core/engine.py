@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 
 from jarvis.bus import BUS, COMMAND, ERROR, FOCUS_CONSOLE, HEARD, RESULT, SAY, STATE
 from jarvis.core import actuator as act
@@ -67,6 +68,10 @@ class Engine:
         self._dispatch_lock = threading.Lock()  # serialises actual execution
         self._running = threading.Event()
         self._state = "idle"
+        # Set by the UI. Runs synchronously on the dispatching thread just
+        # before a command executes, so the UI can hand the keyboard back
+        # to whatever window it borrowed focus from.
+        self.before_dispatch: Callable[[], None] | None = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -184,6 +189,11 @@ class Engine:
         BUS.emit(COMMAND, {"text": text, "source": source})
         self._set_state("acting")
         act.clear_abort()
+        if self.before_dispatch is not None:
+            try:
+                self.before_dispatch()
+            except Exception:
+                log.debug("before_dispatch hook failed", exc_info=True)
         # Serialised deliberately: speech arrives on the decoder thread while
         # typed commands arrive on the UI thread, and two handlers driving the
         # keyboard at once would interleave their keystrokes into one another.

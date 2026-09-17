@@ -168,3 +168,73 @@ def test_files_default_outside_the_install_directory(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     assert files.default_dir() != tmp_path
+
+
+# --- switching speech model actually switched the model --------------------
+# ensure_model returned whichever model happened to be on disk already, so
+# raising accuracy silently kept using the small one.
+
+
+def test_model_url_follows_the_accuracy_tier():
+    from jarvis.config import SPEECH_MODELS, Config
+
+    cfg = Config().speech
+    assert cfg.resolve_model_url() == SPEECH_MODELS["fast"]
+    cfg.accuracy = "accurate"
+    assert cfg.resolve_model_url() == SPEECH_MODELS["accurate"]
+
+
+def test_an_explicit_url_overrides_the_tier():
+    from jarvis.config import Config
+
+    cfg = Config().speech
+    cfg.accuracy = "accurate"
+    cfg.model_url = "https://example.com/my-model.zip"
+    assert cfg.resolve_model_url() == "https://example.com/my-model.zip"
+
+
+def test_an_unknown_tier_falls_back_rather_than_crashing():
+    from jarvis.config import SPEECH_MODELS, Config
+
+    cfg = Config().speech
+    cfg.accuracy = "turbo-ultra"
+    assert cfg.resolve_model_url() == SPEECH_MODELS["fast"]
+
+
+def test_each_model_resolves_to_its_own_directory(tmp_path):
+    """Two models coexist; asking for one must not return the other."""
+    from jarvis.config import SPEECH_MODELS
+    from jarvis.speech import stt
+
+    for url in SPEECH_MODELS.values():
+        name = url.rsplit("/", 1)[-1].removesuffix(".zip")
+        (tmp_path / name / "am").mkdir(parents=True)
+
+    for url in SPEECH_MODELS.values():
+        expected = url.rsplit("/", 1)[-1].removesuffix(".zip")
+        assert stt.ensure_model(url, tmp_path).name == expected
+
+
+def test_a_missing_model_is_downloaded_not_substituted(tmp_path, monkeypatch):
+    from jarvis.config import SPEECH_MODELS
+    from jarvis.speech import stt
+
+    # the fast model is present; asking for the accurate one must not reuse it
+    present = SPEECH_MODELS["fast"].rsplit("/", 1)[-1].removesuffix(".zip")
+    (tmp_path / present / "am").mkdir(parents=True)
+
+    attempted = []
+    monkeypatch.setattr(
+        stt, "_is_model", lambda p: (p / "am").exists() and p.is_dir()
+    )
+
+    def fake_retrieve(url, dest):
+        attempted.append(url)
+        raise OSError("no network in tests")
+
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", fake_retrieve)
+    with pytest.raises(stt.ModelMissing):
+        stt.ensure_model(SPEECH_MODELS["accurate"], tmp_path)
+    assert attempted == [SPEECH_MODELS["accurate"]]

@@ -200,6 +200,7 @@ writes `%USERPROFILE%\.jarvis\config.json`. Useful knobs:
 ```jsonc
 {
   "speech": {
+    "accuracy": "fast",            // "accurate" mishears far less; ~128 MB
     "wake_words": ["jarvis", "hey jarvis"],
     "always_on": false,            // true = no wake word needed, ever
     "partial_dispatch": true,      // the sub-second path; turn off if it misfires
@@ -217,6 +218,12 @@ writes `%USERPROFILE%\.jarvis\config.json`. Useful knobs:
   "brain": { "enabled": false }    // the optional LLM fallback
 }
 ```
+
+**Hearing you better.** `speech.accuracy` is `"fast"` (a ~40 MB model that
+loads in half a second) or `"accurate"` (a ~128 MB wider-graph model that
+mishears far less with background noise or an accent). Switching re-downloads
+once; both can sit on disk together. `speech.model_url` overrides it with any
+Vosk model archive.
 
 **Teaching it new apps.** Drop a `%USERPROFILE%\.jarvis\app_aliases.json`
 mapping spoken names to launch targets; it merges over the built-in list.
@@ -292,7 +299,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 157 tests, ~0.6 s
+python -m pytest tests -q          :: 171 tests, ~0.7 s
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone
@@ -311,7 +318,7 @@ A test for a destructive command asserts on the recorded call, never a real one.
 ```
 jarvis/
   core/      engine (orchestration), router (dispatch), actuator (mouse/keyboard),
-             fastinput (batched Win32 SendInput typing)
+             fastinput (batched SendInput typing), focus (who has the keyboard)
   speech/    stt (Vosk streaming), tts (SAPI5)
   skills/    input_control, apps, window, web, system, files, text_edit, meta
   nlp/       matcher (normalisation, fuzzy), chain (compound commands),
@@ -328,6 +335,7 @@ jarvis/
 | Hotkeys do nothing | Another app owns the combo, or the target window is elevated — run Jarvis as administrator |
 | Commands fire twice | Set `speech.partial_dispatch` to `false` |
 | It hears itself | Use headphones, or set `voice_out.enabled` to `false` |
+| Mishears you / reacts to background noise | Set `speech.accuracy` to `"accurate"` |
 | Typed text comes out garbled | Report it — that app drains input unusually; the clipboard path should already handle it |
 
 ## Licence

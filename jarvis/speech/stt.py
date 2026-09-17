@@ -33,20 +33,27 @@ class ModelMissing(RuntimeError):
     pass
 
 
+def _is_model(path: Path) -> bool:
+    return path.is_dir() and (path / "am").exists()
+
+
 def ensure_model(url: str, target_dir: Path = MODEL_DIR) -> Path:
-    """Return a local Vosk model directory, downloading it once if needed."""
+    """Return the local directory for *this* model, downloading it once if needed.
+
+    Matched by the name the archive unpacks to rather than "any model already
+    here": several can coexist, and switching accuracy has to actually switch
+    rather than silently keep whichever was downloaded first.
+    """
     target_dir.mkdir(parents=True, exist_ok=True)
-    existing = [
-        p for p in target_dir.iterdir() if p.is_dir() and (p / "am").exists()
-    ]
-    if existing:
-        return existing[0]
+    archive_name = url.rsplit("/", 1)[-1]
+    expected = target_dir / archive_name.removesuffix(".zip")
+    if _is_model(expected):
+        return expected
 
     import urllib.request
 
-    name = url.rsplit("/", 1)[-1]
-    archive = target_dir / name
-    log.info("downloading speech model (~40 MB) from %s", url)
+    archive = target_dir / archive_name
+    log.info("downloading speech model from %s (one time)", url)
     try:
         urllib.request.urlretrieve(url, archive)
         with zipfile.ZipFile(archive) as zf:
@@ -59,7 +66,10 @@ def ensure_model(url: str, target_dir: Path = MODEL_DIR) -> Path:
     finally:
         archive.unlink(missing_ok=True)
 
-    found = [p for p in target_dir.iterdir() if p.is_dir() and (p / "am").exists()]
+    if _is_model(expected):
+        return expected
+    # The archive did not use the name we predicted; take whatever it did unpack.
+    found = [p for p in target_dir.iterdir() if _is_model(p)]
     if not found:
         raise ModelMissing(f"Model archive did not contain a model in {target_dir}")
     return found[0]
@@ -96,7 +106,7 @@ class Recognizer:
         from vosk import KaldiRecognizer, Model, SetLogLevel
 
         SetLogLevel(-1)  # Kaldi is extremely chatty on stderr otherwise
-        model_path = ensure_model(self.cfg.model_url)
+        model_path = ensure_model(self.cfg.resolve_model_url())
         log.info("loading acoustic model from %s", model_path)
         model = Model(str(model_path))
         self._recognizer = KaldiRecognizer(model, self.cfg.sample_rate)
