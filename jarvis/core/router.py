@@ -142,13 +142,19 @@ class Router:
         pending_window = result.data.get("await_window")
         if not pending_window:
             return
-        from jarvis.skills.window import wait_for_window
+        from jarvis.skills.window import focus_window, wait_for_window
 
         # Short on purpose. This is the cost paid when an app opens under a
         # title we did not predict, and it is pure latency: six seconds of it
         # turned "open chrome and youtube / play a song" into a 6.2 s command.
-        if wait_for_window(pending_window, timeout=WINDOW_SETTLE_S) is None:
+        window = wait_for_window(pending_window, timeout=WINDOW_SETTLE_S)
+        if window is None:
             log.debug("window %r never appeared; continuing", pending_window)
+            return
+        # Appearing is not the same as being focused. A new window usually
+        # takes the keyboard by itself, but "usually" is how the next step
+        # ends up typing into the previous application.
+        focus_window(window)
 
     def _dispatch_one(self, raw: str, _from_brain: bool = False) -> ActionResult:
         started = time.perf_counter()

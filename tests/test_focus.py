@@ -7,6 +7,8 @@ user was working in — which is exactly what happened: the foreground window wa
 """
 from __future__ import annotations
 
+import pytest
+
 from jarvis.core import focus
 
 
@@ -110,3 +112,87 @@ def test_no_hook_is_fine(no_real_input):
     assert engine.before_dispatch is None
     result = engine.submit("select all", "text")
     assert result is not None and result.ok
+
+
+# --- focusing an existing window is asynchronous too ------------------------
+# `activate()` returns before the switch lands. Reporting success at that point
+# told a chain the window was ready, and "open notepad and write about X"
+# composed two hundred words into whatever still held the keyboard.
+
+
+def test_focus_window_waits_for_the_switch(monkeypatch):
+    from jarvis.skills import window
+
+    class FakeWindow:
+        title = "Untitled - Notepad"
+        isMinimized = False
+
+        def activate(self):
+            pass
+
+    polls = {"n": 0}
+
+    def foreground_after_a_moment():
+        polls["n"] += 1
+        return 7 if polls["n"] >= 3 else 1
+
+    monkeypatch.setattr(focus, "foreground", foreground_after_a_moment)
+    monkeypatch.setattr(
+        focus, "title", lambda h: "Untitled - Notepad" if h == 7 else "Something Else"
+    )
+    assert window.focus_window(FakeWindow()) is True
+    assert polls["n"] >= 3
+
+
+def test_focus_window_reports_failure_rather_than_assuming(monkeypatch):
+    from jarvis.skills import window
+
+    class FakeWindow:
+        title = "Untitled - Notepad"
+        isMinimized = False
+
+        def activate(self):
+            pass
+
+    monkeypatch.setattr(focus, "foreground", lambda: 1)
+    monkeypatch.setattr(focus, "title", lambda _h: "Something Else")
+    assert window.focus_window(FakeWindow(), wait=True) is False
+
+
+def test_focus_window_can_skip_the_wait(monkeypatch):
+    from jarvis.skills import window
+
+    class FakeWindow:
+        title = "x"
+        isMinimized = False
+
+        def activate(self):
+            pass
+
+    monkeypatch.setattr(
+        focus, "foreground", lambda: pytest.fail("should not poll when wait=False")
+    )
+    assert window.focus_window(FakeWindow(), wait=False) is True
+
+
+def test_opening_a_running_app_fails_when_focus_will_not_land(
+    router, no_real_input, monkeypatch
+):
+    """Better to stop the chain than to type into the wrong application."""
+    from jarvis.skills import apps
+
+    class FakeWindow:
+        title = "Untitled - Notepad"
+        isMinimized = False
+
+        def activate(self):
+            pass
+
+    monkeypatch.setattr(apps, "find_window", lambda _n: FakeWindow())
+    monkeypatch.setattr(apps, "focus_window", lambda _w: False)
+
+    result = router.dispatch("open notepad and select all")
+    assert result.ok is False
+    assert "forward" in result.say
+    assert no_real_input == [], "the next step must not have run"
+

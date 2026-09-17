@@ -41,25 +41,52 @@ def find_window(name: str):
     return None
 
 
-def focus_window(window) -> bool:
-    """Raise and focus a window, working around Windows' focus-stealing guard."""
+FOCUS_SETTLE_S = 1.0
+
+
+def focus_window(window, wait: bool = True) -> bool:
+    """Raise a window and, by default, wait until it really has the keyboard.
+
+    `activate()` returns before the switch has landed. Returning True at that
+    point told a chain the window was ready, and the next step typed into
+    whatever still held focus -- "open notepad and write about X" composed two
+    hundred words into some other application. So the result is confirmed
+    against the actual foreground window rather than assumed.
+    """
     if window is None:
         return False
     try:
         if window.isMinimized:
             window.restore()
         window.activate()
-        return True
     except Exception:
         # activate() throws when another process owns the foreground lock.
-        # Alt-tabbing via a click on the window is the reliable fallback.
+        # Minimise/restore asks the shell to do it instead, which usually works.
         try:
             window.minimize()
             window.restore()
-            return True
         except Exception:
             log.debug("could not focus %r", getattr(window, "title", "?"), exc_info=True)
             return False
+
+    if not wait:
+        return True
+    return _focus_landed(window)
+
+
+def _focus_landed(window, timeout: float = FOCUS_SETTLE_S) -> bool:
+    """Poll until `window` is the foreground window, or give up saying so."""
+    from jarvis.core import focus as focus_api
+
+    title = getattr(window, "title", "") or ""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = focus_api.title(focus_api.foreground())
+        if current and (current == title or title in current or current in title):
+            return True
+        time.sleep(0.02)
+    log.info("focus did not settle on %r within %.0f ms", title, timeout * 1000)
+    return False
 
 
 def _active():

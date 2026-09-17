@@ -135,10 +135,16 @@ def do_open(ctx, app: str = "", **_) -> ActionResult:
                     data={"targets": parts},
                 )
 
-    # Already running and visible? Focusing is faster than a cold start.
+    # Already running and visible? Focusing is faster than a cold start --
+    # but only if it works. A chain whose next step types has to know the
+    # window actually took the keyboard, or the text lands somewhere else.
     window = find_window(app)
     if window is not None:
-        focus_window(window)
+        if not focus_window(window):
+            return ActionResult.fail(
+                f"Couldn't bring {app} forward.",
+                "Another window is holding focus; try clicking it once.",
+            )
         ctx.last_target = app
         return ActionResult(ok=True, say=f"{app} is up.")
 
@@ -189,7 +195,8 @@ def do_focus(ctx, app: str = "", **_) -> ActionResult:
     window = find_window(app)
     if window is None:
         return do_open(ctx, app=app)
-    focus_window(window)
+    if not focus_window(window):
+        return ActionResult.fail(f"Couldn't bring {app} forward.")
     ctx.last_target = app
     return ActionResult(ok=True, say="")
 

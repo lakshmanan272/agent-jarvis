@@ -1,9 +1,14 @@
-"""Optional LLM fallback.
+"""The optional model, used for two quite different jobs.
 
-The local router handles everything it has a pattern for in microseconds. This
-module only sees phrases that missed — its job is to rewrite loose natural
-language into one canonical command the router *does* know, not to invent new
-abilities. Keeping it to a rewrite means one small, cheap, bounded call.
+`plan` is the fallback for phrases the router missed. It rewrites loose natural
+language into one canonical command the router already knows -- it does not
+invent abilities, and the reply is checked against the command table before
+anything runs.
+
+`compose` is the opposite: the user asked for prose that does not exist yet
+("write about Vijay"), and the model's answer *is* the deliverable. It is a
+larger, slower call with a much wider output, so the two are kept separate
+rather than one method with a mode flag.
 """
 from __future__ import annotations
 
@@ -21,6 +26,18 @@ no punctuation at the end. If nothing in the list fits, reply exactly: UNKNOWN
 
 Available commands (with example phrasings):
 {catalog}"""
+
+COMPOSE_PROMPT = (
+    "You are writing text that will be typed straight into a document on the "
+    "user's screen. Produce only the text itself: no preamble, no "
+    '"Here is...", no markdown formatting, no surrounding quotes. Plain prose '
+    "in plain paragraphs. Keep it to roughly {words} words unless the request "
+    "clearly asks for more or less."
+)
+
+# Writing a few hundred words takes longer than picking a command out of a
+# list, so composing gets its own budget rather than the router's.
+COMPOSE_TIMEOUT_S = 25.0
 
 
 class Brain:
@@ -102,7 +119,51 @@ class Brain:
             return None
         return reply
 
-    def _anthropic(self, httpx, system: str, text: str) -> str:
+    def compose(self, request: str, words: int = 180) -> str | None:
+        """Write the text the user asked for, ready to be typed.
+
+        Unlike `plan`, there is nothing to validate the answer against: the
+        prose *is* the result. So the guard rails are on the shape rather than
+        the content -- a generous token budget, and a refusal to return
+        something so short it is obviously an apology or an error message.
+        """
+        if not self.available:
+            return None
+        try:
+            import httpx
+        except ImportError:
+            return None
+
+        prompt = COMPOSE_PROMPT.format(words=words)
+        try:
+            if self.cfg.provider == "anthropic":
+                reply = self._anthropic(
+                    httpx, prompt, request,
+                    max_tokens=words * 3, timeout=COMPOSE_TIMEOUT_S,
+                )
+            elif self.cfg.provider == "openai":
+                reply = self._openai(
+                    httpx, prompt, request,
+                    max_tokens=words * 3, timeout=COMPOSE_TIMEOUT_S,
+                )
+            else:
+                reply = self._ollama(httpx, prompt, request)
+        except Exception as exc:
+            log.warning("compose failed: %s", exc)
+            return None
+
+        text = (reply or "").strip().strip('"')
+        if len(text) < 40:
+            # Too short to be the essay that was asked for; almost always the
+            # model declining or erroring in prose.
+            log.info("compose returned %d chars, discarding", len(text))
+            return None
+        return text
+
+    def _anthropic(
+        self, httpx, system: str, text: str,
+        max_tokens: int = 64, timeout: float | None = None,
+    ) -> str:
         key = self.cfg.key()
         response = httpx.post(
             "https://api.anthropic.com/v1/messages",
@@ -113,17 +174,20 @@ class Brain:
             },
             json={
                 "model": self.cfg.model,
-                "max_tokens": 64,
+                "max_tokens": max_tokens,
                 "system": system,
                 "messages": [{"role": "user", "content": text}],
             },
-            timeout=self.cfg.timeout_s,
+            timeout=timeout or self.cfg.timeout_s,
         )
         response.raise_for_status()
         blocks = response.json().get("content", [])
         return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
 
-    def _openai(self, httpx, system: str, text: str) -> str:
+    def _openai(
+        self, httpx, system: str, text: str,
+        max_tokens: int = 64, timeout: float | None = None,
+    ) -> str:
         """Any service speaking the OpenAI chat format.
 
         One method covers Groq, OpenRouter, Together, Gemini's compatibility
@@ -138,14 +202,15 @@ class Brain:
             },
             json={
                 "model": self.cfg.model,
-                "max_tokens": 64,
-                "temperature": 0,  # this is a lookup, not a conversation
+                "max_tokens": max_tokens,
+                # Zero for a lookup; a little warmth when writing prose.
+                "temperature": 0 if max_tokens <= 64 else 0.4,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": text},
                 ],
             },
-            timeout=self.cfg.timeout_s,
+            timeout=timeout or self.cfg.timeout_s,
         )
         response.raise_for_status()
         choices = response.json().get("choices", [])

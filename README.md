@@ -114,7 +114,7 @@ matching the wake word in the transcript.
 
 ## What it understands
 
-90+ intents. `python -m jarvis --list` prints the full table with examples.
+96 intents. `python -m jarvis --list` prints the full table with examples.
 
 **Mouse** — click, double click, right click, click at 400 300, move mouse right
 200, drag to 900 500
@@ -156,6 +156,22 @@ screen, shutdown, restart, sleep, what time is it, battery, system status
 **Files** — create folder reports on desktop, create file notes.txt, open
 downloads, delete file `<path>`, find files budget, run command `<cmd>`, what's
 in the clipboard
+
+**Writing** — write about actor vijay, write a short note about python.
+Needs `brain.enabled`: the model produces the prose and Jarvis types it where
+the cursor is. It writes fluently and it gets facts wrong — two runs about the
+same actor invented a different wrong birth name each time. Treat it as a first
+draft to correct, not as a reference.
+
+**Reading the screen** — what's on screen, what do you see. OCRs what is
+visible and, with a model, summarises it in a sentence or two.
+
+**Dictation** — start dictation / type what i say, then everything you say is
+typed until you say stop dictation. `private dictation` (or "dictate a
+password") does the same without the words appearing on the HUD or in the log:
+the bar shows dots, the log records a length, and the text exists only in the
+keystrokes. Speaking a password aloud is still speaking it aloud — this keeps
+it out of Jarvis's records, not out of the room.
 
 **Meta** — help, stop, repeat, go to sleep, wake up, be quiet, how fast,
 goodbye
@@ -358,7 +374,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 268 tests, ~2.5 s
+python -m pytest tests -q          :: 289 tests, ~4.8 s
 python tools/stress_test.py        :: 21 hardest phrasings, end to end
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent

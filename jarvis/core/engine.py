@@ -14,6 +14,7 @@ at all, and `speech.endpoint_silence_ms` sets how long the rest wait.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -30,6 +31,11 @@ log = logging.getLogger("jarvis.engine")
 # Short, unambiguous commands worth firing from a partial hypothesis. Anything
 # with a free-text tail ("type ...", "search ...") must wait for the final
 # result, or we would act on half a sentence.
+# The only phrases still interpreted while dictating. Everything else is text.
+_DICTATION_CONTROL = re.compile(
+    r"^(?:stop|end|finish|exit)\s+dictat(?:ion|ing)$|^(?:new\s+line|new\s+paragraph)$"
+)
+
 INSTANT_COMMANDS = frozenset(
     {
         "click", "double click", "right click", "middle click",
@@ -180,6 +186,16 @@ class Engine:
     def on_final(self, text: str) -> None:
         if self._muted:
             return
+
+        # Dictation short-circuits routing: while it is on, what was said is
+        # what gets typed. Only the handful of phrases that end or steer the
+        # mode are still interpreted, or there would be no way out of it.
+        if self.ctx.variables.get("dictating") and not _DICTATION_CONTROL.match(
+            normalize(text)
+        ):
+            self._dictate(text)
+            return
+
         BUS.emit(HEARD, {"text": text, "final": True})
         heard, phrase = strip_wake(text, self.config.speech.wake_words)
         if heard:
@@ -203,6 +219,45 @@ class Engine:
             log.debug("ignoring unaddressed speech: %r", text)
             return
         self.submit(text, source="voice")
+
+    def _dictate(self, text: str) -> None:
+        """Type what was said, and be careful about where it is written down.
+
+        A dictated password would otherwise pass through two places it has no
+        business being: the HUD, which shows what was heard, and jarvis.log,
+        which records every command. In private dictation the bar shows dots
+        and the log records a length, and the text exists only in the keystrokes.
+        """
+        text = (text or "").strip()
+        if not text:
+            return
+        private = bool(self.ctx.variables.get("dictating_private"))
+
+        shown = "•" * min(len(text), 32) if private else text
+        BUS.emit(HEARD, {"text": shown, "final": True})
+
+        cfg = self.config.control
+        with self._dispatch_lock:
+            if self.before_dispatch is not None:
+                try:
+                    self.before_dispatch()
+                except Exception:
+                    log.debug("before_dispatch hook failed", exc_info=True)
+            act.type_text(
+                text + " ",
+                paste_threshold=cfg.paste_threshold,
+                interval=cfg.type_interval_s,
+            )
+
+        if private:
+            log.info("dictated %d characters (private)", len(text))
+        else:
+            log.info("dictated %r", text)
+        BUS.emit(
+            RESULT,
+            ActionResult(ok=True, say="", detail=f"dictated {len(text)} chars",
+                         data={"intent": "dictation", "private": private}),
+        )
 
     # --- command in --------------------------------------------------------
 
