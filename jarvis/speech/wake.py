@@ -14,9 +14,33 @@ full recogniser only runs once the answer is yes.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
+import sys
 
 log = logging.getLogger("jarvis.wake")
+
+
+@contextlib.contextmanager
+def _writable_streams():
+    """Give the downloader somewhere to draw its progress bar.
+
+    Under pythonw -- the silent double-click launch -- sys.stdout and
+    sys.stderr are None, and openWakeWord's downloader writes a tqdm bar to
+    them. It raised "NoneType has no attribute write", the exception was
+    caught, and the wake word quietly never loaded in the one configuration
+    users actually run.
+    """
+    saved = sys.stdout, sys.stderr
+    if sys.stdout is None:
+        sys.stdout = io.StringIO()
+    if sys.stderr is None:
+        sys.stderr = io.StringIO()
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved
 
 # openWakeWord is trained on 80 ms frames of 16 kHz audio.
 FRAME_SAMPLES = 1280
@@ -42,11 +66,12 @@ class WakeWord:
             return False
 
         try:
-            # No-op once the files are present; the first run fetches ~6 MB.
-            openwakeword.utils.download_models()
-            self._model = Model(
-                wakeword_models=[self.model_name], inference_framework="onnx"
-            )
+            with _writable_streams():
+                # No-op once the files are present; the first run fetches ~6 MB.
+                openwakeword.utils.download_models()
+                self._model = Model(
+                    wakeword_models=[self.model_name], inference_framework="onnx"
+                )
         except Exception as exc:
             log.warning("could not load wake word %r: %s", self.model_name, exc)
             return False
