@@ -209,6 +209,15 @@ class HUD:
         close_btn.pack(side="right")
         close_btn.bind("<Button-1>", lambda _e: self.hide_bar())
 
+        # Stop whatever is running. Packed first so it sits leftmost of the
+        # controls -- it is the one you reach for in a hurry.
+        self.end_btn = tk.Label(
+            header, text="■ end", bg="#3d1418", fg=ACCENT_OFF,
+            font=mono, cursor="hand2", padx=8, pady=2,
+        )
+        self.end_btn.pack(side="right", padx=(0, 10))
+        self.end_btn.bind("<Button-1>", lambda _e: self.end_task())
+
         # Voice on/off. Labelled with its *current* state rather than the action,
         # so a glance answers "is the mic live right now?" without interpretation.
         self.voice_btn = tk.Label(
@@ -309,6 +318,16 @@ class HUD:
         log.debug("release_focus to %r -> %s", focus.title(self._displaced), restored)
         self._displaced = None
 
+    def end_task(self) -> None:
+        """Abandon the running command and be ready for the next one.
+
+        The same thing Ctrl+Alt+X does, put where it can be found without
+        knowing a shortcut. It clears the text box as well, so whatever is typed
+        there does not go on to run once the abort has landed.
+        """
+        self.entry.delete(0, "end")
+        self.engine.panic()
+
     def toggle_voice(self) -> None:
         """Mute or unmute the microphone from the bar.
 
@@ -375,6 +394,8 @@ class HUD:
     def _set_state(self, state: str) -> None:
         self.orb.set_state(state)
         self._refresh_voice_button()
+        # Only meaningful while something is running.
+        self.end_btn.config(fg=ACCENT_OFF if state == "acting" else DIM)
         color = STATE_LOOK.get(state, STATE_LOOK["idle"])[1]
         self.state_dot.itemconfig(self._dot_id, fill=color)
         self.state_label.config(text=state)

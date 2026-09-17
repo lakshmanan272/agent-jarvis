@@ -148,8 +148,10 @@ class Engine:
     # --- speech in ---------------------------------------------------------
 
     def on_partial(self, text: str) -> None:
+        if self._muted:
+            return  # voice off means nothing reaches the screen either
         BUS.emit(HEARD, {"text": text, "final": False})
-        if not self.config.speech.partial_dispatch or self._muted:
+        if not self.config.speech.partial_dispatch:
             return
         heard, phrase = strip_wake(text, self.config.speech.wake_words)
         if heard:
@@ -161,9 +163,9 @@ class Engine:
             self.submit(candidate, source="voice-partial")
 
     def on_final(self, text: str) -> None:
-        BUS.emit(HEARD, {"text": text, "final": True})
         if self._muted:
             return
+        BUS.emit(HEARD, {"text": text, "final": True})
         heard, phrase = strip_wake(text, self.config.speech.wake_words)
         if heard:
             self.wake(silent=True)
@@ -276,18 +278,39 @@ class Engine:
             self.speaker.say("Yes?")
 
     def panic(self) -> None:
+        """Stop whatever is running, and be ready for the next command.
+
+        The abort flag is deliberately left raised. Clearing it here — which is
+        what this used to do, microseconds after setting it — meant a command
+        running on another thread never observed it and carried on. `submit`
+        clears it before each new command, so the next thing asked for still
+        runs normally.
+        """
         act.abort()
         self.speaker.shush()
         self.ctx.pending_confirm = None
         self._awake_until = 0.0
-        self._set_state("idle")
+        self._set_state("muted" if self._muted else "idle")
         BUS.emit(RESULT, ActionResult(ok=True, say="Stopped."))
-        act.clear_abort()
+        log.info("aborted by the user")
 
     def toggle_mute(self) -> None:
-        muted = not self._muted
+        self.set_muted(not self._muted)
+
+    def set_muted(self, muted: bool) -> None:
+        """Turn the microphone off or on.
+
+        Off really is off: the recogniser stops consuming audio rather than
+        transcribing it and having the result discarded, so nothing appears on
+        screen and no CPU is spent decoding speech nobody asked for.
+        """
         self.ctx.variables["muted"] = muted
+        if self.recognizer is not None:
+            self.recognizer.pause() if muted else self.recognizer.resume()
+        if muted:
+            self._awake_until = 0.0  # close any follow-up window
         self._set_state("muted" if muted else "idle")
+        log.info("microphone %s", "muted" if muted else "live")
 
     def show_console(self) -> None:
         """Ask the UI to reveal the text bar. A no-op headless (nothing listens)."""
@@ -309,6 +332,12 @@ class Engine:
         self._set_state("speaking")
 
     def _on_speech_end(self) -> None:
-        if self.recognizer is not None:
+        # Deliberately not resumed while muted: the pause taken to stop Jarvis
+        # hearing itself must not cancel the user's decision to switch the
+        # microphone off.
+        if self.recognizer is not None and not self._muted:
             self.recognizer.resume()
+        if self._muted:
+            self._set_state("muted")
+            return
         self._set_state("listening" if self._is_awake else "idle")

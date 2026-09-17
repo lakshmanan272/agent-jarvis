@@ -72,7 +72,20 @@ class Router:
         started = time.perf_counter()
         done: list[str] = []
         for index, step in enumerate(steps):
-            result = self._dispatch_one(step)
+            try:
+                result = self._dispatch_one(step)
+            except InterruptedError:
+                return self._finish(
+                    ActionResult(
+                        ok=True,
+                        say="Stopped.",
+                        detail=f"stopped after {len(done)} of {len(steps)} steps",
+                        data={"completed": done},
+                    ),
+                    " / ".join(steps),
+                    started,
+                    "chain",
+                )
 
             if result.needs_confirm or self.ctx.pending_confirm is not None:
                 # A confirmation mid-sequence would leave the remaining steps
@@ -172,6 +185,11 @@ class Router:
             self.ctx.last_command = text
             try:
                 result = intent.handler(self.ctx, **kwargs)
+            except InterruptedError:
+                # The user pressed End. Let it travel: a chain must abandon its
+                # remaining steps rather than treat this as one failed step.
+                log.info("%s aborted by the user", intent.name)
+                raise
             except Exception as exc:
                 log.exception("intent %s failed", intent.name)
                 result = ActionResult.fail(

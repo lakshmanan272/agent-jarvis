@@ -64,10 +64,19 @@ cyan listening, violet acting, green speaking, red muted.
 | Drag | Moves the orb; the bar follows |
 | Right-click | Menu: open console, mute/unmute, exit |
 
-The bar's header carries a **🎙 voice on / 🔇 voice off** button that cuts the
-microphone. It is labelled with the current state rather than the action, so a
-glance answers "is the mic live?" without interpretation, and it shares one flag
-with `Ctrl+Alt+M` and the orb menu so the three can never disagree.
+The bar's header carries two buttons:
+
+**🎙 voice on / 🔇 voice off** cuts the microphone. Off really is off — the
+recogniser stops consuming audio rather than transcribing it and discarding the
+result, so nothing appears on screen and no CPU is spent decoding speech nobody
+asked for. It is labelled with the current state rather than the action, so a
+glance answers "is the mic live?", and it shares one flag with `Ctrl+Alt+M` and
+the orb menu so the three can never disagree.
+
+**■ end** abandons whatever is running and leaves Jarvis ready for the next
+command: a chain drops its remaining steps, a pending confirmation is forgotten,
+and anything queued to be spoken is dropped. Same as `Ctrl+Alt+X`, where you can
+find it without knowing the shortcut.
 
 The bar shows what was heard, what happened, and how long it took, with a text
 box for typing commands. It also pops open by itself whenever a command actually
@@ -79,7 +88,7 @@ noise as a phrase.
 | --- | --- |
 | `Ctrl+Alt+J` | Wake / start listening |
 | `Ctrl+Alt+K` | Focus the text box |
-| `Ctrl+Alt+X` | Panic stop — aborts the running action and stops speaking |
+| `Ctrl+Alt+X` | End — aborts the running action and stops speaking |
 | `Ctrl+Alt+M` | Mute / unmute the microphone |
 
 Slam the mouse into a screen corner to trigger PyAutoGUI's failsafe and abort
@@ -312,7 +321,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 195 tests, ~0.8 s
+python -m pytest tests -q          :: 206 tests, ~0.6 s
 python tools/stress_test.py        :: 21 hardest phrasings, end to end
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
