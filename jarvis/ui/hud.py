@@ -38,6 +38,15 @@ ACCENT_OFF = "#f85149"
 FIELD = "#161b22"
 FIELD_EDGE = "#2a313a"
 PLACEHOLDER = "Say “Hey Jarvis”, or type a command"
+# What each state means to someone looking at the bar, rather than the
+# engine's own vocabulary.
+STATE_WORDS = {
+    "idle": "say “hey jarvis”",
+    "listening": "listening",
+    "acting": "working",
+    "speaking": "speaking",
+    "muted": "microphone off",
+}
 ENTRY_HINT = "Type a command and press Enter"
 CHROMA = "#ff00fe"  # keyed out by -transparentcolor; must appear nowhere else
 
@@ -357,6 +366,12 @@ class HUD:
                 self._displaced = displaced
                 log.debug("displacing %r", focus.title(displaced))
             self.entry.focus_force()
+            # Opening the bar is as explicit an address as saying the wake
+            # word, so it counts as one. Without this the user opens the bar,
+            # speaks, and nothing happens at all -- the recogniser is still
+            # waiting to hear "hey Jarvis" and shows nothing while it waits,
+            # which is indistinguishable from the app having frozen.
+            self.engine.wake(silent=True)
         self._bar_visible = True
 
     def release_focus(self) -> None:
@@ -453,11 +468,17 @@ class HUD:
     def _set_state(self, state: str) -> None:
         self.orb.set_state(state)
         self._refresh_voice_button()
+        # "idle" says nothing about why nothing is happening. With the wake
+        # word gating the recogniser, the honest label is what it is waiting to
+        # hear.
+        self.state_label.config(
+            text=STATE_WORDS.get(state, state),
+            fg=DIM if state in ("idle", "muted") else FG,
+        )
         # Only meaningful while something is running.
         self.end_btn.config(fg=ACCENT_OFF if state == "acting" else DIM)
         color = STATE_LOOK.get(state, STATE_LOOK["idle"])[1]
         self.state_dot.itemconfig(self._dot_id, fill=color)
-        self.state_label.config(text=state)
 
     def _set_heard(self, payload: dict) -> None:
         text = payload.get("text", "")
