@@ -35,6 +35,12 @@ class SpeechConfig:
     block_ms: int = 30                # audio chunk size fed to the recogniser
     device: int | None = None         # input device index, None = default mic
     wake_words: list[str] = field(default_factory=lambda: ["jarvis", "hey jarvis"])
+    # An acoustic wake-word detector, so the recogniser can stay asleep until
+    # it is actually addressed. "none" falls back to matching `wake_words` in
+    # the transcript, which needs everything transcribed first.
+    wake_engine: str = "openwakeword"     # "openwakeword" | "none"
+    wake_model: str = "hey_jarvis"
+    wake_threshold: float = 0.5
     # Once woken, keep listening for this long so follow-ups need no wake word.
     conversation_timeout_s: float = 12.0
     always_on: bool = False           # True = act on every phrase, no wake word

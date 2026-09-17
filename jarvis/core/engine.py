@@ -111,7 +111,13 @@ class Engine:
 
         try:
             self.recognizer = Recognizer(
-                self.config.speech, on_final=self.on_final, on_partial=self.on_partial
+                self.config.speech,
+                on_final=self.on_final,
+                on_partial=self.on_partial,
+                on_wake=self.on_wake_word,
+                # The recogniser asks this before every block. While it is
+                # False the audio only reaches the wake-word detector.
+                should_decode=lambda: self._is_awake and not self._muted,
             )
             self.recognizer.start()
         except ModelMissing as exc:
@@ -147,6 +153,15 @@ class Engine:
 
     # --- speech in ---------------------------------------------------------
 
+    def on_wake_word(self) -> None:
+        """The acoustic detector heard our name.
+
+        Distinct from `wake`: this arrives before anything has been
+        transcribed, and it is the point at which the recogniser is allowed to
+        start. What follows is a command, so no wake word is expected in it.
+        """
+        self.wake(silent=True)
+
     def on_partial(self, text: str) -> None:
         if self._muted:
             return  # voice off means nothing reaches the screen either
@@ -178,12 +193,12 @@ class Engine:
         if not (self._is_awake or self.config.speech.always_on):
             return
 
-        # Unaddressed speech inside the follow-up window. The microphone hears
-        # the speakers too, so a playing video's dialogue arrives here looking
-        # like a command attempt. Acting only on phrases that actually match
-        # something keeps a film from driving the desktop, and staying silent
-        # about the rest keeps it from filling the HUD with "I don't know how
-        # to ..." for every line of it.
+        # Unaddressed speech inside the follow-up window. Acoustic gating means
+        # most of it never reaches here at all, but the window stays open for a
+        # few seconds after a command and the room does not go quiet to order.
+        # Acting only on phrases that match something keeps a film from driving
+        # the desktop, and staying silent about the rest keeps it from filling
+        # the HUD with "I don't know how to ..." for every line.
         if not self.router.can_handle(text):
             log.debug("ignoring unaddressed speech: %r", text)
             return

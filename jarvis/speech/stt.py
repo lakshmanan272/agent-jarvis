@@ -88,10 +88,17 @@ class Recognizer:
         cfg: SpeechConfig,
         on_final: Callable[[str], None],
         on_partial: Callable[[str], None] | None = None,
+        on_wake: Callable[[], None] | None = None,
+        should_decode: Callable[[], bool] | None = None,
     ) -> None:
         self.cfg = cfg
         self.on_final = on_final
         self.on_partial = on_partial or (lambda _t: None)
+        self.on_wake = on_wake or (lambda: None)
+        # Asked before each block: is the agent currently listening for a
+        # command? While it is not, audio goes to the wake detector alone.
+        self.should_decode = should_decode or (lambda: True)
+        self.wake = None
         self._audio: queue.Queue[bytes] = queue.Queue(maxsize=64)
         self._stop = threading.Event()
         self._paused = threading.Event()
@@ -111,6 +118,12 @@ class Recognizer:
         model = Model(str(model_path))
         self._recognizer = KaldiRecognizer(model, self.cfg.sample_rate)
         self._recognizer.SetWords(False)
+
+        if self.cfg.wake_engine == "openwakeword":
+            from jarvis.speech.wake import WakeWord
+
+            candidate = WakeWord(self.cfg.wake_model, self.cfg.wake_threshold)
+            self.wake = candidate if candidate.start() else None
 
         block = int(self.cfg.sample_rate * self.cfg.block_ms / 1000)
         self._stream = sd.RawInputStream(
@@ -201,6 +214,19 @@ class Recognizer:
             try:
                 chunk = self._audio.get(timeout=0.2)
             except queue.Empty:
+                continue
+
+            # While nobody has addressed us, the audio goes to the wake-word
+            # detector alone. That costs a fifteenth of what running the full
+            # recogniser costs, and — more to the point — a film playing in the
+            # room is never transcribed, so it can never be mistaken for a
+            # command. Vosk only sees audio from "hey Jarvis" onwards.
+            if self.wake is not None and not self.should_decode():
+                if self.wake.heard(chunk):
+                    log.info("wake word detected")
+                    self._recognizer.Reset()
+                    last_partial, silent_blocks, heard_speech = "", 0, False
+                    self.on_wake()
                 continue
 
             level = self._level(chunk)

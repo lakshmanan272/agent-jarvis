@@ -16,6 +16,8 @@ vosk==0.3.45
 sounddevice==0.5.1
 numpy==2.1.3
 pyttsx3==2.98
+# Acoustic wake word, so the recogniser can stay asleep until addressed.
+openwakeword==0.6.0
 
 # --- matching / parsing ---
 rapidfuzz==3.10.1

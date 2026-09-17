@@ -95,11 +95,17 @@ Slam the mouse into a screen corner to trigger PyAutoGUI's failsafe and abort
 anything in flight.
 
 **Jarvis hears your speakers, not just you.** With a video playing, its
-dialogue reaches the microphone. Say "Jarvis" and you always get an answer,
-even if it is "I don't know how to that". Speech that *isn't* addressed to it —
-anything in the follow-up window after a command — is obeyed only when it
-clearly matches a command, and ignored in silence otherwise. A film cannot
-drive your desktop, and it cannot fill the HUD with complaints either.
+dialogue reaches the microphone. So the recogniser does not run until it is
+addressed: an acoustic wake-word detector listens for **"hey Jarvis"** at a
+fortieth of one CPU core (RTF 0.025, against 0.38 for the recogniser it gates),
+and only then is any audio transcribed. A film is never turned into text at
+all, so it can never be mistaken for a command.
+
+Once awake there is a short follow-up window, during which speech that does not
+clearly match a command is ignored in silence rather than answered with "I
+don't know how to ...". Say "Jarvis" and you always get a reply, even if the
+reply is that it cannot. Set `speech.wake_engine` to `"none"` to go back to
+matching the wake word in the transcript.
 
 ---
 
@@ -266,14 +272,32 @@ mapping spoken names to launch targets; it merges over the built-in list.
 
 **The LLM fallback.** Off by default. When on, phrases the router can't match
 are sent to a model, which rewrites them into one existing command (or answers
-`UNKNOWN`). It cannot invent new abilities.
+`UNKNOWN`). It cannot invent new abilities, and commands the router already
+knows never reach it — those still resolve in microseconds with no network.
 
-```bat
-set ANTHROPIC_API_KEY=sk-ant-...
-python -m jarvis --brain
+The catalog sent with each request is ranked by similarity to what was said and
+cut to the closest 18 commands. Sending all 91 costs ~1100 tokens a call, which
+exhausts a typical free tier in about seven commands; the shortlist is 4.3x
+smaller and is also a better prompt.
+
+`provider` is `"anthropic"`, `"ollama"`, or `"openai"` — the last covers Groq,
+OpenRouter, Together, Gemini's compatibility endpoint and a local llama.cpp
+server, which differ only in `base_url` and model name.
+
+```jsonc
+"brain": {
+  "enabled": true,
+  "provider": "openai",
+  "base_url": "https://api.groq.com/openai/v1",
+  "model": "qwen/qwen3.8-27b",
+  "api_key_env": "GROQ_API_KEY"     // or "api_key", in this file only
+}
 ```
 
-Set `brain.provider` to `ollama` to keep even that step local.
+Measured against Groq: commands the router knows, 0.1 ms and no network;
+phrases only the planner can handle, 9 of 10, median 893 ms. The tenth turned
+the volume the wrong way — a planner that acts on a misreading is worse than
+one that declines, and that is not solved.
 
 ---
 
@@ -331,7 +355,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 241 tests, ~0.8 s
+python -m pytest tests -q          :: 256 tests, ~1.7 s
 python tools/stress_test.py        :: 21 hardest phrasings, end to end
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
@@ -353,7 +377,7 @@ jarvis/
   core/      engine (orchestration), router (dispatch), actuator (mouse/keyboard),
              fastinput (batched SendInput typing), focus (who has the keyboard),
              screen (finding things by the words on them)
-  speech/    stt (Vosk streaming), tts (SAPI5)
+  speech/    stt (Vosk streaming), wake (acoustic wake word), tts (SAPI5)
   skills/    input_control, apps, window, web, system, files, text_edit, meta
   nlp/       matcher (normalisation, fuzzy), chain (compound commands),
              brain (optional LLM fallback)
