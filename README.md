@@ -110,6 +110,16 @@ drive your desktop, and it cannot fill the HUD with complaints either.
 **Mouse** — click, double click, right click, click at 400 300, move mouse right
 200, drag to 900 500
 
+**Clicking by name** — choose AD JAYANTAN, click Sign in, select Guest mode.
+Names something you can see rather than a coordinate. It asks Windows'
+accessibility tree first, which is exact and fast and covers Explorer, Settings
+and most native software; where an app publishes nothing useful — Chrome's
+profile picker offers nine elements, none of them the profiles — it falls back
+to Windows' own offline OCR, which sees whatever is drawn. Jarvis's own orb and
+bar are excluded from the search, or "click open settings" would find the bar
+quoting you back and click that. It refuses rather than guesses: a label that
+isn't on screen gets "I can't see that", not a click somewhere arbitrary.
+
 **Keyboard** — type `<anything>`, press enter, press ctrl s, press tab 3 times,
 delete 5 words, new line, question mark, spell jarvis
 
@@ -321,7 +331,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 206 tests, ~0.6 s
+python -m pytest tests -q          :: 241 tests, ~0.8 s
 python tools/stress_test.py        :: 21 hardest phrasings, end to end
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
@@ -341,7 +351,8 @@ A test for a destructive command asserts on the recorded call, never a real one.
 ```
 jarvis/
   core/      engine (orchestration), router (dispatch), actuator (mouse/keyboard),
-             fastinput (batched SendInput typing), focus (who has the keyboard)
+             fastinput (batched SendInput typing), focus (who has the keyboard),
+             screen (finding things by the words on them)
   speech/    stt (Vosk streaming), tts (SAPI5)
   skills/    input_control, apps, window, web, system, files, text_edit, meta
   nlp/       matcher (normalisation, fuzzy), chain (compound commands),
@@ -359,6 +370,7 @@ jarvis/
 | Commands fire twice | Set `speech.partial_dispatch` to `false` |
 | It hears itself | Use headphones, or set `voice_out.enabled` to `false` |
 | Mishears you / reacts to background noise | Set `speech.accuracy` to `"accurate"` |
+| "I can't see that on screen" | The label must be visible and spelled as shown; OCR reads what is drawn, not what is scrolled out of view |
 | Typed text comes out garbled | Report it — that app drains input unusually; the clipboard path should already handle it |
 
 ## Licence

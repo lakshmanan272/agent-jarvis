@@ -313,3 +313,49 @@ def do_caret_jump(ctx, where: str = "top", **_) -> ActionResult:
     combo = mapping[where]
     act.hotkey(*combo) if len(combo) > 1 else act.press(combo[0])
     return ActionResult(ok=True, say="")
+
+
+@intent(
+    r"^(?:click|choose|select|tap|pick|hit)\s+(?:on\s+)?(?:the\s+)?(?P<label>.+?)"
+    r"(?:\s+(?:button|option|icon|link|tab|profile|item))?"
+    r"(?:\s+(?:in|on|from)\s+(?P<where>[\w .\-]+))?$",
+    name="click_text",
+    # Last resort. Everything specific -- "select all", "press enter",
+    # "click at 400 300" -- must win first; this is what is left when the user
+    # names something they can see rather than something we have a verb for.
+    priority=-10,
+    verbatim=True,
+    description="Click something on screen by the words written on it",
+    examples=("choose AD JAYANTAN", "click Sign in", "select Guest mode"),
+)
+def do_click_text(ctx, label: str = "", where: str | None = None, **_) -> ActionResult:
+    from jarvis.core import screen
+
+    label = (label or "").strip()
+    if not label:
+        return ActionResult.fail("Click what?")
+
+    if where:
+        # "choose AD JAYANTAN in chrome" -- bring that window forward first, so
+        # the search looks at the right thing.
+        from jarvis.skills.window import find_window, focus_window
+
+        window = find_window(where)
+        if window is not None:
+            focus_window(window)
+
+    target = screen.find(label)
+    if target is None:
+        return ActionResult.fail(
+            f"I can't see {label} on screen.",
+            "Nothing matching that is visible, or the app doesn't expose it.",
+        )
+    x, y = target.centre
+    act.move(x, y)
+    act.click()
+    return ActionResult(
+        ok=True,
+        say="",
+        detail=f"clicked {target.text!r} at {x},{y} via {target.source}",
+        data={"matched": target.text, "x": x, "y": y, "source": target.source},
+    )

@@ -85,3 +85,30 @@ def restore(hwnd: int | None, timeout: float = 0.25) -> bool:
         time.sleep(0.005)
     log.debug("focus did not settle on %r within %.0f ms", title(hwnd), timeout * 1000)
     return False
+
+
+def our_window_rects() -> list[tuple[int, int, int, int]]:
+    """Screen rectangles of this process's own visible windows.
+
+    The orb and the command bar are on screen like anything else, so a search
+    for text to click would happily find Jarvis's own status line and click
+    that. These rectangles are the exclusion zone.
+    """
+    if not AVAILABLE:
+        return []
+
+    rects: list[tuple[int, int, int, int]] = []
+    ours = os.getpid()
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def collect(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == ours and _user32.IsWindowVisible(hwnd):
+            rect = wintypes.RECT()
+            if _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                rects.append((rect.left, rect.top, rect.right, rect.bottom))
+        return True
+
+    _user32.EnumWindows(collect, 0)
+    return rects
