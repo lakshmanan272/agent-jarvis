@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-jarvis"
+version = "1.0.0"
+description = "A fast voice- and text-controlled desktop agent for Windows"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pyautogui>=0.9.54",
+    "pygetwindow>=0.0.9",
+    "pyperclip>=1.9.0",
+    "psutil>=6.1.0",
+    "keyboard>=0.13.5",
+    "vosk>=0.3.45",
+    "sounddevice>=0.5.1",
+    "numpy>=2.0",
+    "pyttsx3>=2.98",
+    "rapidfuzz>=3.10",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+jarvis = "jarvis.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-cov>=6.0", "ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+include = ["jarvis*"]
+
+[tool.setuptools.package-data]
+jarvis = ["data/*.json"]
+
+[tool.ruff]
+line-length = 96
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["B008", "SIM108"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
