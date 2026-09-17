@@ -85,6 +85,20 @@ class _FakeSubprocess:
         return _FakeCompleted()
 
 
+_REAL_ACTUATOR: dict = {}
+
+
+@pytest.fixture
+def real_actuator():
+    """The unstubbed actuator functions, for tests *of* the actuator itself.
+
+    `no_real_input` replaces these module attributes for every test, which is
+    what you want everywhere except when the actuator's own routing logic is
+    the thing under test.
+    """
+    return _REAL_ACTUATOR
+
+
 @pytest.fixture(autouse=True)
 def no_real_input(monkeypatch):
     """Replace every mouse/keyboard primitive with a recording stub."""
@@ -95,6 +109,7 @@ def no_real_input(monkeypatch):
         "click", "move", "move_relative", "drag_to", "scroll", "press",
         "hotkey", "type_text", "mouse_down", "mouse_up", "write_clipboard",
     ):
+        _REAL_ACTUATOR.setdefault(name, getattr(actuator, name))
         monkeypatch.setattr(
             actuator, name, lambda *a, _n=name, **k: calls.append((_n, a, k))
         )

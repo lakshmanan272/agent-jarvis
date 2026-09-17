@@ -16,9 +16,17 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
+
 from jarvis.config import MODEL_DIR, SpeechConfig
 
 log = logging.getLogger("jarvis.stt")
+
+# A block counts as speech when it stands this far above the ambient floor,
+# with an absolute floor so a dead-silent room cannot make the ratio trigger
+# on its own noise.
+SPEECH_OVER_NOISE = 3.0
+MIN_SPEECH_RMS = 130.0
 
 
 class ModelMissing(RuntimeError):
@@ -151,21 +159,71 @@ class Recognizer:
             # Better to drop a 30 ms block than to build unbounded latency.
             log.debug("audio queue full, dropping a block")
 
+    def _level(self, chunk: bytes) -> float:
+        """RMS amplitude of one block, 0..32768."""
+        samples = np.frombuffer(chunk, dtype=np.int16)
+        if samples.size == 0:
+            return 0.0
+        # float64 accumulate: int16 squares overflow int16 immediately.
+        return float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+
     def _decode_loop(self) -> None:
+        """Feed audio to Vosk, and decide for ourselves when the user stopped.
+
+        Vosk has its own endpointer, but it is tuned for dictation and waits out
+        a long pause before finalising. For a command agent that pause *is* the
+        latency: the words are already decoded, we are only waiting to be told
+        the sentence ended. So we watch the signal level ourselves and force a
+        final result after a short run of quiet blocks, typically cutting a few
+        hundred milliseconds off every spoken command.
+        """
         last_partial = ""
+        silent_blocks = 0
+        heard_speech = False
+        # Adaptive, because "quiet" in a cafe is not "quiet" in a bedroom. Seeded
+        # high so a noisy first second cannot wedge the gate shut.
+        noise_floor = 200.0
+        quiet_blocks_needed = max(
+            1, int(self.cfg.endpoint_silence_ms / self.cfg.block_ms)
+        )
+
         while not self._stop.is_set():
             try:
                 chunk = self._audio.get(timeout=0.2)
             except queue.Empty:
                 continue
+
+            level = self._level(chunk)
+            speaking = level > max(noise_floor * SPEECH_OVER_NOISE, MIN_SPEECH_RMS)
+            if speaking:
+                heard_speech = True
+                silent_blocks = 0
+            else:
+                silent_blocks += 1
+                # Track the floor only while quiet, and only drift downwards
+                # quickly / upwards slowly, so one cough cannot deafen us.
+                weight = 0.05 if level < noise_floor else 0.005
+                noise_floor = (1 - weight) * noise_floor + weight * level
+
             if self._recognizer.AcceptWaveform(chunk):
+                # Vosk got there first (a long utterance, or a hard stop).
                 text = json.loads(self._recognizer.Result()).get("text", "").strip()
-                last_partial = ""
+                last_partial, silent_blocks, heard_speech = "", 0, False
                 if text:
                     self.on_final(text)
                 continue
 
             partial = json.loads(self._recognizer.PartialResult()).get("partial", "").strip()
+
+            if heard_speech and silent_blocks >= quiet_blocks_needed and partial:
+                # The speaker has stopped and we already have the words. Close
+                # the utterance now instead of waiting for Vosk to agree.
+                text = json.loads(self._recognizer.FinalResult()).get("text", "").strip()
+                last_partial, silent_blocks, heard_speech = "", 0, False
+                if text:
+                    self.on_final(text)
+                continue
+
             if not partial or partial == last_partial:
                 continue
             last_partial = partial

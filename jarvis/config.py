@@ -29,6 +29,10 @@ class SpeechConfig:
     conversation_timeout_s: float = 12.0
     always_on: bool = False           # True = act on every phrase, no wake word
     partial_dispatch: bool = True     # act on stable partials for lower latency
+    # How much quiet ends an utterance. Vosk's own endpointer waits far longer
+    # because it is tuned for dictation; for commands this is the single
+    # biggest slice of end-to-end latency. Raise it if words get cut off.
+    endpoint_silence_ms: int = 180
 
 
 @dataclass
@@ -45,10 +49,11 @@ class ControlConfig:
     # pyautogui pause between primitives. 0 = as fast as the OS accepts.
     action_pause_s: float = 0.0
     move_duration_s: float = 0.0      # instant cursor teleport
-    # Not zero: Electron/WebView apps (VS Code, the new Notepad, Slack) drop
-    # keystrokes fed faster than their renderer polls, and a swallowed space is
-    # worse than 10 ms. Anything longer than `paste_threshold` skips typing
-    # entirely and goes through the clipboard, which is O(1) and exact.
+    # Fallback typing only. The normal path injects a whole sentence in one
+    # batched SendInput call and ignores both of these; they apply when that is
+    # refused (an elevated window, the secure desktop, a non-Windows host), and
+    # the interval is non-zero because Electron/WebView apps drop keystrokes
+    # fed faster than their renderer polls.
     type_interval_s: float = 0.01
     paste_threshold: int = 12
     failsafe: bool = True             # slam mouse to a corner to abort

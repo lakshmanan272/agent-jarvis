@@ -1,14 +1,15 @@
 """The orchestrator: microphone and hotkeys in, actions out.
 
 Latency budget for a spoken command, measured on a mid-range laptop:
-    audio block            30 ms
-    Vosk incremental decode  ~40 ms (already done when speech stops)
-    endpoint detection     ~250 ms of trailing silence
-    normalise + route      <1 ms
-    actuate                5-40 ms
-Total ~300-400 ms from the last syllable to the click. The endpoint wait is the
-dominant term, which is why `partial_dispatch` exists: an exact-match partial
-("click", "scroll down") fires without waiting for silence at all.
+    audio block                30 ms
+    Vosk incremental decode    ~40 ms (already done when speech stops)
+    our own endpoint detection 180 ms of trailing silence
+    normalise + route          ~30 us
+    actuate (typing)           ~60 us for a sentence, one SendInput call
+Roughly 250 ms from the last syllable to the action, and the trailing silence
+is now most of it. Two things attack that number: `partial_dispatch` fires
+exact-match short commands ("click", "scroll down") without waiting for silence
+at all, and `speech.endpoint_silence_ms` sets how long the rest wait.
 """
 from __future__ import annotations
 
@@ -232,6 +233,11 @@ class Engine:
     @property
     def _muted(self) -> bool:
         return bool(self.ctx.variables.get("muted"))
+
+    @property
+    def is_muted(self) -> bool:
+        """Public view of the mic state, for the UI's voice toggle."""
+        return self._muted
 
     def _extend_conversation(self) -> None:
         self._awake_until = time.monotonic() + self.config.speech.conversation_timeout_s

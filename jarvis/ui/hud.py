@@ -32,6 +32,8 @@ FG = "#e6edf3"
 DIM = "#7d8590"
 OK = "#3fb950"
 BAD = "#f85149"
+ACCENT_ON = "#22d3ee"
+ACCENT_OFF = "#f85149"
 CHROMA = "#ff00fe"  # keyed out by -transparentcolor; must appear nowhere else
 
 ORB_SIZE = 78
@@ -121,8 +123,10 @@ class Orb:
     def _context_menu(self, event) -> None:
         menu = tk.Menu(self.root, tearoff=0, bg="#161b22", fg=FG, activebackground="#22d3ee")
         menu.add_command(label="Open console", command=self.hud.show_bar)
-        menu.add_command(label="Mute" if not self.hud.engine._muted else "Unmute",
-                          command=self.hud.engine.toggle_mute)
+        menu.add_command(
+            label="Unmute microphone" if self.hud.engine.is_muted else "Mute microphone",
+            command=self.hud.toggle_voice,
+        )
         menu.add_separator()
         menu.add_command(label="Exit Jarvis", command=self.hud.request_exit)
         menu.tk_popup(event.x_root, event.y_root)
@@ -204,6 +208,15 @@ class HUD:
         close_btn.pack(side="right")
         close_btn.bind("<Button-1>", lambda _e: self.hide_bar())
 
+        # Voice on/off. Labelled with its *current* state rather than the action,
+        # so a glance answers "is the mic live right now?" without interpretation.
+        self.voice_btn = tk.Label(
+            header, text="🎙 voice on", bg="#10343d", fg=ACCENT_ON,
+            font=mono, cursor="hand2", padx=8, pady=2,
+        )
+        self.voice_btn.pack(side="right", padx=(0, 10))
+        self.voice_btn.bind("<Button-1>", lambda _e: self.toggle_voice())
+
         self.timing = tk.Label(header, text="", bg=BG, fg=DIM, font=mono, anchor="e")
         self.timing.pack(side="right", padx=(0, 10))
 
@@ -263,6 +276,23 @@ class HUD:
         self.entry.focus_force()
         self._bar_visible = True
 
+    def toggle_voice(self) -> None:
+        """Mute or unmute the microphone from the bar.
+
+        This flips the same flag the Ctrl+Alt+M hotkey and the orb's menu use,
+        so the three controls can never disagree about whether the mic is live.
+        """
+        self.engine.toggle_mute()
+        self._refresh_voice_button()
+
+    def _refresh_voice_button(self) -> None:
+        muted = self.engine.is_muted
+        self.voice_btn.config(
+            text="🔇 voice off" if muted else "🎙 voice on",
+            fg=ACCENT_OFF if muted else ACCENT_ON,
+            bg="#3d1418" if muted else "#10343d",
+        )
+
     def hide_bar(self) -> None:
         self.bar.withdraw()
         self._bar_visible = False
@@ -311,6 +341,7 @@ class HUD:
 
     def _set_state(self, state: str) -> None:
         self.orb.set_state(state)
+        self._refresh_voice_button()
         color = STATE_LOOK.get(state, STATE_LOOK["idle"])[1]
         self.state_dot.itemconfig(self._dot_id, fill=color)
         self.state_label.config(text=state)

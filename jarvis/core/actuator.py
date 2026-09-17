@@ -14,6 +14,8 @@ import time
 import pyautogui
 import pyperclip
 
+from jarvis.core import fastinput
+
 log = logging.getLogger("jarvis.actuator")
 
 _ABORT = threading.Event()
@@ -126,13 +128,23 @@ def hotkey(*keys: str) -> None:
 
 
 def type_text(text: str, paste_threshold: int = 24, interval: float = 0.0) -> None:
-    """Type `text`, pasting long strings because typing them is O(n) keystrokes.
+    """Type `text` into the focused field, as close to instantly as Windows allows.
 
-    Clipboard paste is effectively constant time and survives IME/layout quirks,
-    so anything past the threshold goes through the clipboard and the previous
-    clipboard contents are restored afterwards.
+    Three routes, best first:
+
+    1. One batched `SendInput` call — the whole string atomically, in
+       microseconds, independent of keyboard layout. This is the normal path.
+    2. Clipboard paste — constant time, but it clobbers what the user had
+       copied and needs a beat to settle, so it is only for when (1) is refused
+       (an elevated window, the secure desktop, a non-Windows host).
+    3. Per-character typing, for short strings where the clipboard would be a
+       rude thing to touch.
     """
     _check()
+    if fastinput.type_text(text):
+        return
+
+    log.debug("SendInput unavailable, falling back for %d chars", len(text))
     if len(text) <= paste_threshold and text.isascii():
         pyautogui.typewrite(text, interval=interval, _pause=False)
         return

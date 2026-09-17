@@ -62,7 +62,12 @@ cyan listening, violet acting, green speaking, red muted.
 | --- | --- |
 | Click | Opens the command bar; click again to collapse it |
 | Drag | Moves the orb; the bar follows |
-| Right-click | Menu: open console, mute, exit |
+| Right-click | Menu: open console, mute/unmute, exit |
+
+The bar's header carries a **🎙 voice on / 🔇 voice off** button that cuts the
+microphone. It is labelled with the current state rather than the action, so a
+glance answers "is the mic live?" without interpretation, and it shares one flag
+with `Ctrl+Alt+M` and the orb menu so the three can never disagree.
 
 The bar shows what was heard, what happened, and how long it took, with a text
 box for typing commands. It also pops open by itself whenever a command actually
@@ -124,11 +129,11 @@ Measured on a mid-range laptop, from the last syllable to the action:
 | --- | --- |
 | Audio block | 30 ms |
 | Vosk incremental decode | ~40 ms, already done when you stop speaking |
-| Endpoint (trailing silence) | ~250 ms |
-| Normalise + route | **21 µs** (`python -m jarvis --benchmark`) |
-| Actuate | 5–40 ms |
+| Endpoint (trailing silence) | **180 ms**, our own, not Vosk's |
+| Normalise + route | **~30 µs** (`python -m jarvis --benchmark`) |
+| Actuate — typing a sentence | **~60 µs**, one `SendInput` call |
 
-Four decisions carry most of that:
+Five decisions carry most of that:
 
 1. **Streaming recognition, not batch.** Vosk decodes as audio arrives. Whisper
    is more accurate but only starts work once you stop talking, which costs
@@ -140,10 +145,21 @@ Four decisions carry most of that:
 3. **Regex routing, no model in the loop.** Intent matching is a sweep over
    compiled patterns. The LLM is a *fallback* for phrases that miss, and it only
    rewrites them into a command the router already knows.
-4. **No artificial pauses.** PyAutoGUI adds 100 ms to every primitive and
-   animates cursor moves by default; both are turned off. Long strings go
-   through the clipboard, which is constant time instead of one keystroke per
-   character.
+4. **Typing is one syscall, not one per key.** Every per-character API —
+   `typewrite`, `keybd_event` — pays a syscall and a scheduler slot per key, so
+   at the 10 ms interval slow apps need, a 43-character sentence costs 430 ms.
+   Win32's `SendInput` takes an *array* and injects it atomically: the same
+   sentence costs ~60 µs, about 7,000× less. It also carries Unicode rather
+   than virtual key codes, so it is layout-independent and types Tamil, emoji
+   and accented text that the old path could not.
+5. **We decide when you stopped talking.** Vosk's endpointer is tuned for
+   dictation and waits out a long pause; for commands that pause *is* the
+   latency, because the words are already decoded. Jarvis watches the signal
+   level itself — with an adaptive noise floor, so a café and a bedroom both
+   work — and finalises after 180 ms of quiet (`speech.endpoint_silence_ms`).
+
+6. **No artificial pauses.** PyAutoGUI adds 100 ms to every primitive and
+   animates cursor moves by default; both are turned off.
 
 ---
 
@@ -162,6 +178,7 @@ writes `%USERPROFILE%\.jarvis\config.json`. Useful knobs:
     "always_on": false,            // true = no wake word needed, ever
     "partial_dispatch": true,      // the sub-second path; turn off if it misfires
     "conversation_timeout_s": 12.0,
+    "endpoint_silence_ms": 180,    // quiet that ends an utterance; raise if cut off
     "device": null                 // input device index, null = default mic
   },
   "voice_out": { "enabled": true, "rate": 200, "voice_hint": "" },
@@ -249,7 +266,7 @@ handler is re-invoked with `_confirmed=True` on a spoken "yes".
 ## Development
 
 ```bat
-python -m pytest tests -q          :: 117 tests, ~0.8 s
+python -m pytest tests -q          :: 131 tests, ~0.4 s
 python -m jarvis --benchmark       :: routing latency per phrase
 python -m jarvis --list            :: every registered intent
 python -m jarvis --no-voice --no-ui:: headless REPL, no microphone
@@ -267,7 +284,8 @@ A test for a destructive command asserts on the recorded call, never a real one.
 
 ```
 jarvis/
-  core/      engine (orchestration), router (dispatch), actuator (mouse/keyboard)
+  core/      engine (orchestration), router (dispatch), actuator (mouse/keyboard),
+             fastinput (batched Win32 SendInput typing)
   speech/    stt (Vosk streaming), tts (SAPI5)
   skills/    input_control, apps, window, web, system, files, text_edit, meta
   nlp/       matcher (normalisation, fuzzy), brain (optional LLM fallback)
