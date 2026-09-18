@@ -254,6 +254,15 @@ class HUD:
         self.timing = tk.Label(header, text="", bg=BG, fg=DIM, font=mono, anchor="e")
         self.timing.pack(side="right", padx=(0, 12))
 
+        # --- the input row, claimed first -----------------------------------
+        # Packed before the body although it is drawn below it. Tk hands out
+        # space in packing order and squeezes whatever comes last, so with the
+        # body first a long reply (a screen description is a paragraph) pushed
+        # the input row clean off the bottom of the window: the reply was
+        # there, the box to type the next command was not.
+        row = tk.Frame(self.bar, bg=BG)
+        row.pack(side="bottom", fill="x", padx=18, pady=(8, 16))
+
         # --- what was heard, and what came of it ----------------------------
         body = tk.Frame(self.bar, bg=BG)
         body.pack(fill="both", expand=True, padx=18, pady=(10, 4))
@@ -269,10 +278,6 @@ class HUD:
             wraplength=self.cfg.width - 44, justify="left",
         )
         self.status.pack(fill="x", pady=(4, 0))
-
-        # --- the input row --------------------------------------------------
-        row = tk.Frame(self.bar, bg=BG)
-        row.pack(fill="x", padx=18, pady=(8, 16))
 
         # A one-pixel frame behind the entry is how Tk gets a visible border:
         # Entry's own relief options draw a bevel that looks wrong on a dark
@@ -423,11 +428,24 @@ class HUD:
         self.bar.withdraw()
         self._bar_visible = False
 
+    def _bar_height(self) -> int:
+        """Tall enough for what is in it, never taller than half the screen.
+
+        The configured height is a minimum, not a size. A one-line "Done."
+        gets the compact bar; a paragraph of screen description gets the room
+        it needs, and past half the screen the text is what gets clipped --
+        not the controls, which are anchored to the bottom edge.
+        """
+        self.bar.update_idletasks()
+        needed = self.bar.winfo_reqheight()
+        ceiling = int(self.root.winfo_screenheight() * 0.5)
+        return max(self.cfg.height, min(needed, ceiling))
+
     def reposition_bar(self) -> None:
         ox, oy, ow, oh = self.orb.geometry_box()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        width, height = self.cfg.width, self.cfg.height
+        width, height = self.cfg.width, self._bar_height()
         # Prefer the side of the orb with room; default to opening inward
         # from a screen edge so the bar never spills off-screen.
         x = ox + ow - width if ox + ow / 2 > sw / 2 else ox
@@ -438,6 +456,10 @@ class HUD:
             y = oy + oh + 10
         y = max(8, min(y, sh - height - 8))
         self.bar.geometry(f"{width}x{height}+{x}+{y}")
+        # Geometry is a request until the window manager acts on it. Flushing
+        # it here means the resize lands in the same frame as the text that
+        # caused it, rather than a redraw later.
+        self.bar.update_idletasks()
 
     def request_exit(self) -> None:
         import threading
@@ -507,10 +529,18 @@ class HUD:
         # back open right after the user closes it, on every stray sound.
         if not self._bar_visible and (result.ok or self._last_source != "voice"):
             self.show_bar(take_focus=False)
+        else:
+            self._refit()
 
     def _set_error(self, message: str) -> None:
         self.status.config(text=str(message), fg=BAD)
         self.show_bar(take_focus=False)
+        self._refit()
+
+    def _refit(self) -> None:
+        """Resize an already-open bar around the reply it is now showing."""
+        if self._bar_visible and not self._user_moved_bar:
+            self.reposition_bar()
 
     # --- input ---------------------------------------------------------------
 
