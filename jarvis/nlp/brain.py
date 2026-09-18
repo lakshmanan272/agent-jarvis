@@ -56,6 +56,10 @@ COMPOSE_PROMPT = (
 # list, so composing gets its own budget rather than the router's.
 COMPOSE_TIMEOUT_S = 25.0
 
+# A screenshot is a large request and the model has to read it before it
+# can answer, so this is wider than the router's budget by design.
+VISION_TIMEOUT_S = 30.0
+
 
 class Brain:
     def __init__(self, cfg) -> None:
@@ -169,6 +173,66 @@ class Brain:
             log.info("compose returned %d chars, discarding", len(text))
             return None
         return text
+
+    def look(self, system: str, question: str, png: bytes,
+             max_tokens: int = 400) -> str | None:
+        """Ask the model about a picture of the screen.
+
+        OCR answers "what words are there", which is not the same as "what am
+        I looking at and where is it". A vision model gives both, and the
+        coordinates it returns are what makes acting on the screen possible at
+        all when no accessibility name matches.
+
+        Sent in the OpenAI multimodal shape, so any provider speaking that
+        format works; Gemini's compatibility endpoint is the one this was
+        measured against.
+        """
+        import base64
+
+        try:
+            import httpx
+        except ImportError:
+            return None
+
+        data = base64.b64encode(png).decode("ascii")
+        content = [
+            {"type": "text", "text": question},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{data}"},
+            },
+        ]
+        for cfg, label in self._providers():
+            if cfg.provider != "openai":
+                # Only the OpenAI-shaped path carries images here. Skipping is
+                # better than sending a text-only request that would answer
+                # confidently about a screen it never saw.
+                continue
+            try:
+                response = httpx.post(
+                    f"{cfg.base_url.rstrip('/')}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {cfg.key()}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": cfg.model,
+                        "max_tokens": max_tokens,
+                        "temperature": 0,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": content},
+                        ],
+                    },
+                    timeout=VISION_TIMEOUT_S,
+                )
+                response.raise_for_status()
+                choices = response.json().get("choices", [])
+                if choices:
+                    return choices[0]["message"].get("content") or None
+            except Exception as exc:
+                log.warning("%s vision call failed: %s", label, exc)
+        return None
 
     def _ask(
         self, httpx, system: str, text: str,
