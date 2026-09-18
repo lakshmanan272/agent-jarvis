@@ -57,6 +57,27 @@ def _check() -> None:
         raise InterruptedError("aborted by user")
 
 
+class WrongWindow(RuntimeError):
+    """Jarvis holds the keyboard, so a keystroke would act on Jarvis."""
+
+
+def _check_target() -> None:
+    """Refuse to type into ourselves.
+
+    Every keystroke goes to whatever has the keyboard, and when that is the
+    command bar the command runs perfectly against Jarvis's own empty text
+    box -- which is how "delete all text in the notepad" selected nothing,
+    deleted nothing, and reported two steps done in 8 ms. Failing loudly is
+    worth more than a fast, false success.
+    """
+    from jarvis.core import focus
+
+    if focus.is_ours(focus.foreground()):
+        raise WrongWindow(
+            "Jarvis has the keyboard. Click the window you want first."
+        )
+
+
 # --- mouse -----------------------------------------------------------------
 
 def screen_size() -> tuple[int, int]:
@@ -117,6 +138,7 @@ def normalize_key(key: str) -> str:
 
 def press(*keys: str, presses: int = 1) -> None:
     _check()
+    _check_target()
     _await_paste()
     for _ in range(presses):
         for key in keys:
@@ -125,6 +147,7 @@ def press(*keys: str, presses: int = 1) -> None:
 
 def hotkey(*keys: str) -> None:
     _check()
+    _check_target()
     _await_paste()
     pyautogui.hotkey(*[normalize_key(k) for k in keys], _pause=False)
 
@@ -158,6 +181,7 @@ def type_text(text: str, paste_threshold: int = 24, interval: float = 0.0) -> No
     microseconds), but "works" is not something we can detect in advance, and a
     silently mistyped sentence is worse than 44 ms.
     """
+    _check_target()
     _check()
     if not text:
         return

@@ -327,7 +327,8 @@ class HUD:
         self._bar_visible = False
         self._user_moved_bar = False
         self._last_source = ""
-        # The window the bar took the keyboard from, owed it back.
+        # The last window that was not ours: the one a command is meant
+        # to act on, and the one owed the keyboard back before it runs.
         self._displaced: int | None = None
         # Runs on the engine's thread immediately before a command is
         # dispatched, whether it arrived by voice or by typing.
@@ -388,9 +389,21 @@ class HUD:
         """
         if self._displaced is None:
             return
+        current = focus.foreground()
+        if current is not None and not focus.is_ours(current):
+            # The user is already in the window they mean. Nothing to hand
+            # back, and forcing a switch here would drag them out of it.
+            return
         restored = focus.restore(self._displaced)
         log.debug("release_focus to %r -> %s", focus.title(self._displaced), restored)
-        self._displaced = None
+        if not restored:
+            log.warning(
+                "could not hand the keyboard back to %r; the command would act "
+                "on Jarvis itself", focus.title(self._displaced)
+            )
+        # Deliberately kept, not cleared: the next command typed into the bar
+        # needs handing back to the same window, and by then the bar has not
+        # displaced anything new.
 
     def end_task(self) -> None:
         """Abandon the running command and be ready for the next one.
@@ -613,7 +626,22 @@ class HUD:
         if not self.engine.running:
             self.close()
             return
+        self._remember_foreground()
         self.root.after(250, self._tick)
+
+    def _remember_foreground(self) -> None:
+        """Keep a note of the last window that was not one of ours.
+
+        Recording it only at the moment the bar opens was not enough: clicking
+        the orb makes the *orb* the foreground window, so by the time the bar
+        appeared there was nothing left to remember, and the command ran with
+        Jarvis still holding the keyboard. "Select all and delete" then
+        selected and deleted the contents of Jarvis's own empty text box, in
+        8 ms, and truthfully reported two steps done.
+        """
+        hwnd = focus.foreground()
+        if hwnd is not None and not focus.is_ours(hwnd):
+            self._displaced = hwnd
 
     def run(self) -> None:
         self.root.mainloop()

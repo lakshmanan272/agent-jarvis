@@ -196,3 +196,83 @@ def test_opening_a_running_app_fails_when_focus_will_not_land(
     assert "forward" in result.say
     assert no_real_input == [], "the next step must not have run"
 
+
+
+# --- a command must never act on Jarvis itself ------------------------------
+# Every keystroke goes to whatever holds the keyboard. When that is the command
+# bar, "select all and delete" runs perfectly against Jarvis's own empty text
+# box: two steps, 8 ms, "Done, 2 steps." -- and the user's document untouched.
+# That is worse than an error, because nothing about it looks wrong.
+
+
+def _unstub(monkeypatch, real_actuator, *names):
+    """Put the genuine actuator functions back for one test.
+
+    `no_real_input` is autouse, so the module attributes are recording stubs
+    everywhere. These tests are about what the real ones refuse to do.
+    """
+    from jarvis.core import actuator
+
+    for name in names:
+        monkeypatch.setattr(actuator, name, real_actuator[name])
+
+
+def test_keystrokes_are_refused_when_jarvis_holds_the_keyboard(
+    router, real_actuator, monkeypatch
+):
+    from jarvis.core import actuator
+
+    _unstub(monkeypatch, real_actuator, "hotkey")
+    monkeypatch.setattr(focus, "is_ours", lambda _h: True)
+    sent: list = []
+    monkeypatch.setattr(actuator.pyautogui, "hotkey", lambda *a, **k: sent.append(a))
+
+    result = router.dispatch("select all")
+    assert result.ok is False
+    assert "keyboard" in result.say
+    assert sent == [], "the keystroke went out anyway"
+
+
+def test_keystrokes_go_out_normally_otherwise(router, real_actuator, monkeypatch):
+    from jarvis.core import actuator
+
+    _unstub(monkeypatch, real_actuator, "hotkey")
+    monkeypatch.setattr(focus, "is_ours", lambda _h: False)
+    sent: list = []
+    monkeypatch.setattr(actuator.pyautogui, "hotkey", lambda *a, **k: sent.append(a))
+
+    assert router.dispatch("select all").ok is True
+    assert sent == [("ctrl", "a")]
+
+
+def test_typing_is_refused_too(real_actuator, monkeypatch):
+    from jarvis.core import actuator
+
+    _unstub(monkeypatch, real_actuator, "type_text")
+    monkeypatch.setattr(focus, "is_ours", lambda _h: True)
+    with pytest.raises(actuator.WrongWindow):
+        actuator.type_text("hello")
+
+
+# --- remembering which window the user actually meant -----------------------
+# Recording it when the bar opens is too late: clicking the orb makes the orb
+# the foreground window, so there was nothing left to remember and the command
+# ran with Jarvis holding the keyboard.
+
+
+def test_the_last_real_window_is_remembered(monkeypatch):
+    from jarvis.ui import hud as hud_module
+
+    watcher = hud_module.HUD.__new__(hud_module.HUD)
+    watcher._displaced = None
+
+    monkeypatch.setattr(focus, "foreground", lambda: 4242)
+    monkeypatch.setattr(focus, "is_ours", lambda h: False)
+    watcher._remember_foreground()
+    assert watcher._displaced == 4242
+
+    # Our own orb taking focus must not overwrite it.
+    monkeypatch.setattr(focus, "foreground", lambda: 99)
+    monkeypatch.setattr(focus, "is_ours", lambda h: h == 99)
+    watcher._remember_foreground()
+    assert watcher._displaced == 4242, "the orb overwrote the user's window"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 
+from jarvis.core.actuator import WrongWindow
 from jarvis.nlp.chain import split_commands
 from jarvis.nlp.matcher import light_clean, normalize, strip_lead_in
 from jarvis.skills import load_all_skills
@@ -198,6 +199,12 @@ class Router:
                 # remaining steps rather than treat this as one failed step.
                 log.info("%s aborted by the user", intent.name)
                 raise
+            except WrongWindow as exc:
+                # Not a failure of the command -- it never reached a window.
+                # Say which, rather than the generic apology, because the fix
+                # is the user's to make: click where they meant it to go.
+                log.warning("%s had nowhere to act: %s", intent.name, exc)
+                result = ActionResult.fail(str(exc), f"{intent.name}: wrong window")
             except Exception as exc:
                 log.exception("intent %s failed", intent.name)
                 result = ActionResult.fail(
