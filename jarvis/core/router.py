@@ -62,7 +62,9 @@ class Router:
                 return True
         return False
 
-    def _dispatch_chain(self, steps: list[str]) -> ActionResult:
+    def _dispatch_chain(
+        self, steps: list[str], _from_brain: bool = False
+    ) -> ActionResult:
         """Run a sequence, stopping at the first step that fails.
 
         Stopping matters: the steps are usually dependent. "Open notepad and
@@ -73,7 +75,7 @@ class Router:
         done: list[str] = []
         for index, step in enumerate(steps):
             try:
-                result = self._dispatch_one(step)
+                result = self._dispatch_one(step, _from_brain)
             except InterruptedError:
                 return self._finish(
                     ActionResult(
@@ -208,14 +210,21 @@ class Router:
                 result = ActionResult(ok=True, say=result.needs_confirm)
             return self._finish(result, text, started, intent.name)
 
-        # The brain only ever rewrites a phrase into a command we already have,
+        # The brain only ever rewrites a phrase into commands we already have,
         # so its output gets one pass through the router and no second opinion:
         # without this guard a rewrite that also misses would loop back here.
         if not _from_brain and self.brain is not None and self.brain.available:
             plan = self.brain.plan(text, self._intents)
             if plan:
                 log.info("brain resolved %r -> %r", text, plan)
-                return self._dispatch_one(plan, _from_brain=True)
+                # Split it: one spoken request is often several commands, and
+                # "delete all the text" rewrites to "select all and delete".
+                # Running only the first step left the text on screen and
+                # still said "done".
+                steps = split_commands(plan)
+                if len(steps) > 1:
+                    return self._dispatch_chain(steps, _from_brain=True)
+                return self._dispatch_one(steps[0] if steps else plan, _from_brain=True)
 
         return self._finish(
             ActionResult.fail(f"I don't know how to {text}."), text, started

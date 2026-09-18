@@ -20,9 +20,20 @@ log = logging.getLogger("jarvis.brain")
 # is almost always present, few enough to stay inside a free tier's budget.
 SHORTLIST = 18
 
-SYSTEM_PROMPT = """You translate a user's spoken request into exactly ONE command \
-from the list below. Reply with the command text only: no quotes, no explanation, \
+# A rewrite may be a short chain, because a single spoken request often is
+# one: "delete all the text" is select-all and then delete. Rewriting it to
+# "select all" alone left the text on screen and still reported done.
+# Bounded so a confused model cannot turn one phrase into a rampage.
+MAX_PLAN_STEPS = 4
+
+SYSTEM_PROMPT = """You translate a user's spoken request into commands from \
+the list below. Reply with the command text only: no quotes, no explanation, \
 no punctuation at the end. If nothing in the list fits, reply exactly: UNKNOWN
+
+Most requests are one command. When the request genuinely needs more than one \
+step, join them with " and " in the order they must run, up to {max_steps} \
+steps. Never drop a step the user asked for: "delete all the text" is \
+"select all and delete", not "select all".
 
 Available commands (with example phrasings):
 {catalog}"""
@@ -100,7 +111,9 @@ class Brain:
             import httpx
         except ImportError:
             return None
-        prompt = SYSTEM_PROMPT.format(catalog=self._build_catalog(intents, text))
+        prompt = SYSTEM_PROMPT.format(
+            catalog=self._build_catalog(intents, text), max_steps=MAX_PLAN_STEPS
+        )
         try:
             if self.cfg.provider == "anthropic":
                 reply = self._anthropic(httpx, prompt, text)
@@ -114,8 +127,10 @@ class Brain:
         reply = (reply or "").strip().strip('"').strip()
         if not reply or reply.upper().startswith("UNKNOWN"):
             return None
-        # Guard against the model echoing the prompt or waffling.
-        if len(reply) > 120 or "\n" in reply:
+        # Guard against the model echoing the prompt or waffling. A chain of
+        # four commands is longer than one, so the ceiling scales with it --
+        # but a newline is still waffle, never a plan.
+        if len(reply) > 120 * MAX_PLAN_STEPS or "\n" in reply:
             return None
         return reply
 

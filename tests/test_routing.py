@@ -220,3 +220,65 @@ def test_the_catalog_only_offers_working_phrasings(router):
         if not any(i.match(normalize(phrase)) for i in router.intents)
     ]
     assert dead == [], f"catalog offers phrases that match nothing: {dead}"
+
+
+# --- a rewrite may be more than one step ------------------------------------
+# "delete all text in the notepad" was rewritten to "select all" -- the second
+# half of the request was dropped, the text stayed on screen, and the chain
+# reported "done" for the step it did run. A spoken request is frequently more
+# than one command, so the planner is allowed to say so and the router has to
+# run all of what it says.
+
+
+class _FixedBrain:
+    """A planner that always returns the same rewrite."""
+
+    available = True
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+        self.calls = 0
+
+    def plan(self, _text, _intents):
+        self.calls += 1
+        return self.reply
+
+
+def _router_with(brain):
+    from jarvis.config import Config
+    from jarvis.core.router import Router
+    from jarvis.skills.base import Context
+
+    ctx = Context(config=Config(), speak=lambda _t: None)
+    return Router(ctx, brain=brain)
+
+
+def test_a_multi_step_rewrite_runs_every_step(no_real_input):
+    brain = _FixedBrain("select all and delete")
+    result = _router_with(brain).dispatch("delete all text in the notepad")
+    assert result.ok
+    pressed = [a for name, a, _k in no_real_input if name in ("press", "hotkey")]
+    flat = [str(x) for args in pressed for x in args]
+    assert any("a" in f for f in flat), "never selected"
+    assert any("delete" in f or "backspace" in f for f in flat), "never deleted"
+
+
+def test_a_single_step_rewrite_still_works(no_real_input):
+    brain = _FixedBrain("select all")
+    result = _router_with(brain).dispatch("highlight the lot")
+    assert result.ok
+    assert brain.calls == 1
+
+
+def test_a_rewrite_is_never_sent_back_to_the_planner(no_real_input, monkeypatch):
+    """Each step of a rewritten chain is final; a miss must not re-plan.
+
+    Without the guard the second step of a rewrite that itself missed would
+    go back to the planner, and a wrong rewrite could loop indefinitely.
+    """
+    from jarvis.core import screen
+
+    monkeypatch.setattr(screen, "find", lambda *_a, **_k: None)
+    brain = _FixedBrain("select all and fly to the moon")
+    _router_with(brain).dispatch("do the impossible")
+    assert brain.calls == 1, "the rewrite was sent back round the loop"
