@@ -357,6 +357,12 @@ def do_click_text(ctx, label: str = "", where: str | None = None, **_) -> Action
 
     target = screen.find(label)
     if target is None:
+        # Neither the accessibility tree nor the words on screen could answer.
+        # Before giving up, let a model look at the picture: "the third
+        # option" and "the drive with the least space" are not written
+        # anywhere and are not named controls, but they are plain to see.
+        target = screen.find_by_vision(ctx, label)
+    if target is None:
         return ActionResult.fail(
             f"I can't see {label} on screen.",
             "Nothing matching that is visible, or the app doesn't expose it.",
@@ -393,7 +399,10 @@ ORDINALS = {
     r"^(?:click|choose|select|open|tap|pick|hit)\s+(?:on\s+)?(?:the\s+)?"
     r"(?P<which>first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
     r"|last|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)"
-    r"\s+(?P<kind>link|result|button|item|tab)s?$",
+    # "option", "one" and "thing" name no control type at all; they are here
+    # because people say them, and the vision fallback is what answers them.
+    r"\s+(?P<kind>link|result|button|item|tab|option|one|thing|icon|file"
+    r"|folder|drive|row|card)s?$",
     name="click_nth",
     # Above click_text, which would otherwise take "first" as a label and go
     # looking for the word "first" written somewhere on screen. It is not, so
@@ -412,10 +421,15 @@ def do_click_nth(ctx, which: str = "", kind: str = "", **_) -> ActionResult:
 
     target = screen.find_nth(kind, index)
     if target is None:
+        # The tree publishes nothing of that kind -- File Explorer's drive
+        # tiles are not links, buttons or list items to it. Looking at the
+        # picture is how "the third option" gets answered at all.
+        target = screen.find_by_vision(ctx, f"the {which} {kind}")
+    if target is None:
         return ActionResult.fail(
             f"I can't pick the {which} {kind} here.",
-            "This app publishes no such controls to the accessibility tree. "
-            "Naming what the link says works instead.",
+            "This app publishes no such controls, and looking at the screen "
+            "did not settle it either. Naming what it says works instead.",
         )
     x, y = target.centre
     act.move(x, y)

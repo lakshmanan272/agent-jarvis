@@ -392,3 +392,107 @@ def _screen_size() -> tuple[int, int]:
         return pyautogui.size()
     except Exception:
         return (1920, 1080)
+
+
+# --- when neither the tree nor the text can answer -------------------------
+
+# The model reads a scaled screen; full resolution costs tokens and latency
+# without improving where it says to click.
+VISION_WIDTH = 1280
+
+VISION_SYSTEM = """You locate one thing in a screenshot of a Windows desktop.
+
+The image is {w} by {h} pixels. Answer in the image's own pixels.
+
+Reply with ONE JSON object and nothing else:
+{{"found": true, "x": <int>, "y": <int>, "label": "what is written there"}}
+or
+{{"found": false, "why": "<one short sentence>"}}
+
+Give the centre of the thing itself, not of the panel around it. If several
+things could be meant, pick the one a person would, and say which in "label".
+If it is genuinely not visible, say found false -- do not guess a coordinate."""
+
+
+def find_by_vision(ctx, label: str) -> Target | None:
+    """Ask a model where `label` is, when nothing else could find it.
+
+    The accessibility tree only knows what an application publishes, and OCR
+    only knows words that are drawn. Neither can answer "the third option" or
+    "the drive with the least space free" -- there is no such text anywhere,
+    and no control named that. A model looking at the picture can.
+
+    Last resort by construction: it costs a screenshot leaving the machine
+    and about a second and a half, so both cheaper routes run first.
+    """
+    if not getattr(ctx.config.control, "visual_fallback", False):
+        return None
+
+    from jarvis.nlp.brain import Brain
+
+    brain = Brain(ctx.config.brain)
+    if not brain.available:
+        return None
+
+    try:
+        import io as _io
+
+        import pyautogui
+
+        shot = pyautogui.screenshot()
+        full_width = shot.width
+        if shot.width > VISION_WIDTH:
+            shot.thumbnail((VISION_WIDTH, VISION_WIDTH))
+        buffer = _io.BytesIO()
+        shot.save(buffer, format="PNG")
+    except Exception as exc:
+        log.debug("could not capture the screen: %s", exc)
+        return None
+
+    scale = full_width / shot.width
+    reply = brain.look(
+        VISION_SYSTEM.format(w=shot.width, h=shot.height),
+        f"Where is: {label}",
+        buffer.getvalue(),
+        max_tokens=300,
+    )
+    answer = _json_object(reply or "")
+    if not answer or not answer.get("found"):
+        log.debug("vision could not find %r: %s", label, (answer or {}).get("why"))
+        return None
+
+    try:
+        x, y = int(answer["x"]), int(answer["y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (0 <= x <= shot.width and 0 <= y <= shot.height):
+        log.debug("vision gave %d,%d, outside the image", x, y)
+        return None
+
+    real_x, real_y = int(x * scale), int(y * scale)
+    box = (real_x - 1, real_y - 1, real_x + 1, real_y + 1)
+    if _excluded(box, focus.our_window_rects()):
+        # It found Jarvis's own bar, which is quoting the phrase back.
+        log.debug("vision pointed inside our own window")
+        return None
+    return Target(
+        str(answer.get("label") or label),
+        *box,
+        score=100.0,
+        source="vision",
+    )
+
+
+def _json_object(raw: str) -> dict | None:
+    """The JSON object out of a reply that may be fenced or chatty."""
+    import json
+    import re
+
+    match = re.search(r"\{.*\}", raw or "", re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None

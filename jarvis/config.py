@@ -80,6 +80,11 @@ class ControlConfig:
     paste_threshold: int = 12
     failsafe: bool = True             # slam mouse to a corner to abort
     confirm_destructive: bool = True  # ask before shutdown / close-all / delete
+    # When the accessibility tree and OCR both fail to locate something the
+    # user pointed at, ask a vision model where it is rather than answering
+    # "I can't see that". Costs a screenshot leaving the machine, and about a
+    # second and a half, so it is the last resort and never the first.
+    visual_fallback: bool = True
 
 
 @dataclass

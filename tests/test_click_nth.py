@@ -178,9 +178,15 @@ def test_naming_a_label_still_goes_to_the_text_search(router):
         assert hit == "click_text", phrase
 
 
-def test_it_says_so_when_the_app_publishes_nothing(router, no_real_input, monkeypatch):
-    monkeypatch.setattr(screen, "find_nth", lambda _k, _i: None)
+def test_it_says_so_when_nothing_can_find_it(router, no_real_input, monkeypatch):
+    """Only after looking at the screen has failed too."""
+    tried = []
+    monkeypatch.setattr(screen, "find_nth", lambda _k, _i: tried.append("tree"))
+    monkeypatch.setattr(
+        screen, "find_by_vision", lambda _ctx, _l: tried.append("vision")
+    )
     result = router.dispatch("click the first link")
     assert result.ok is False
-    assert "Naming what the link says" in result.detail
+    assert tried == ["tree", "vision"], "both routes must be tried before failing"
+    assert "Naming what it says" in result.detail
     assert no_real_input == []
