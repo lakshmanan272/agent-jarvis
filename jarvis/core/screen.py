@@ -81,6 +81,18 @@ def find(label: str) -> Target | None:
 
 # --- scoring ---------------------------------------------------------------
 
+def _exact(query: str, candidate: str) -> int:
+    """1 when the label is literally what was asked for, ignoring case.
+
+    A tie-break, not a score. Eight Chrome profiles named Lakshman, Lakshman
+    2007, lakshmanan, lakshmanan 2007, Lakshmanan and Lakshmanan CEA all score
+    100 against "lakshmanan", and the previous tie-break -- smallest box --
+    picked "Lakshman", a different person's profile. Where one of the tied
+    labels is exactly the words spoken, that is the one meant.
+    """
+    return int(query.strip().casefold() == candidate.strip().casefold())
+
+
 def _score(query: str, candidate: str) -> float:
     """How well `candidate` answers `query`, 0-100."""
     query, candidate = query.strip().lower(), candidate.strip().lower()
@@ -193,9 +205,10 @@ def _find_via_uia(label: str) -> Target | None:
             if _excluded(box, ours):
                 continue
             candidate = Target(name, *box, score=score, source="uia")
-            # Prefer the better match, then the smaller control: the tightest
-            # thing carrying the name is the thing meant, not its container.
-            if best is None or (score, -candidate.area) > (best.score, -best.area):
+            # Prefer the better match, then the label that is exactly what was
+            # said, then the smaller control: the tightest thing carrying the
+            # name is the thing meant, not its container.
+            if best is None or _rank(candidate, label) > _rank(best, label):
                 best = candidate
         except Exception:
             continue
@@ -271,6 +284,11 @@ def _find_via_ocr(label: str) -> Target | None:
         if score < MATCH_FLOOR:
             continue
         candidate = Target(text, *box, score=score, source="ocr")
-        if best is None or (score, -candidate.area) > (best.score, -best.area):
+        if best is None or _rank(candidate, label) > _rank(best, label):
             best = candidate
     return best
+
+
+def _rank(target: Target, query: str) -> tuple[float, int, int]:
+    """Sort key for choosing between candidates that all cleared the floor."""
+    return (target.score, _exact(query, target.text), -target.area)

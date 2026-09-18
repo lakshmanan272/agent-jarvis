@@ -237,3 +237,55 @@ def test_a_misspelling_still_finds_the_button():
     """Coverage is fuzzy per word, so "conform" is covered by "Confirm"."""
     winner, _s = _best("conform and continue", ["Confirm and continue"])
     assert winner == "Confirm and continue"
+
+
+# --- choosing between labels that all match ---------------------------------
+# A Chrome profile picker with Lakshman, Lakshman 2007, lakshmanan,
+# lakshmanan 2007, Lakshmanan and Lakshmanan CEA on it: every one of those
+# scores 100 against "lakshmanan". The tie-break used to be the smallest box,
+# which picked "Lakshman" -- a different person's profile.
+
+PROFILES = [
+    "AD", "AD JAYANTAN", "Cseb", "Cseb Placement", "Krishna", "laksh",
+    "laksh manan", "Lakshman", "Lakshman 2007", "lakshmanan",
+    "lakshmanan 2007", "Lakshmanan CEA", "LIGETH", "Guest mode",
+]
+
+
+def _pick(query, labels=None):
+    """The label `find` would settle on, without needing a real screen."""
+    from jarvis.core.screen import MATCH_FLOOR, _exact, _score
+
+    scored = [(c, _score(query, c)) for c in labels or PROFILES]
+    viable = [(c, s) for c, s in scored if s >= MATCH_FLOOR]
+    if not viable:
+        return None
+    return max(viable, key=lambda pair: (pair[1], _exact(query, pair[0])))[0]
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    ["lakshmanan", "Lakshman", "lakshmanan 2007", "Lakshman 2007",
+     "Lakshmanan CEA", "laksh manan", "laksh", "Krishna", "AD JAYANTAN"],
+)
+def test_the_exact_name_wins_over_the_similar_ones(spoken):
+    assert _pick(spoken) == spoken or _pick(spoken).casefold() == spoken.casefold()
+
+
+def test_a_partial_name_no_longer_lands_on_a_different_profile():
+    """Nothing is exactly "lakshman an", so this is a genuine near-miss --
+    but it must not silently pick a stranger's profile either."""
+    from jarvis.core.screen import _exact
+
+    assert _exact("lakshmanan", "Lakshman") == 0
+    assert _exact("lakshmanan", "lakshmanan") == 1
+    assert _exact("LAKSHMANAN", "  lakshmanan  ") == 1, "case and space only"
+
+
+def test_score_still_decides_before_exactness():
+    """Exactness is a tie-break, not an override: a better-scoring label
+    still wins even when a worse one happens to be exact."""
+    from jarvis.core.screen import _score
+
+    assert _score("guest mode", "Guest mode") > _score("guest mode", "Guest")
+    assert _pick("guest mode") == "Guest mode"
