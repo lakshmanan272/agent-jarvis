@@ -292,3 +292,103 @@ def _find_via_ocr(label: str) -> Target | None:
 def _rank(target: Target, query: str) -> tuple[float, int, int]:
     """Sort key for choosing between candidates that all cleared the floor."""
     return (target.score, _exact(query, target.text), -target.area)
+
+
+# --- picking by position rather than by name -------------------------------
+
+# UI Automation's control type ids for the things people count out loud.
+CONTROL_TYPES = {
+    "link": 50005,      # Hyperlink
+    "button": 50000,
+    "result": 50005,    # a search result is a link
+    "item": 50007,      # ListItem
+    "tab": 50018,       # TabItem
+}
+
+
+def find_nth(kind: str, index: int) -> Target | None:
+    """The `index`-th `kind` on screen, counting in reading order.
+
+    "Click the first link" names nothing that is written anywhere, so no
+    amount of matching text can answer it -- the search for "first" found
+    nothing and reported it, correctly and uselessly. This counts controls
+    instead, which the accessibility tree can do exactly.
+
+    OCR cannot serve here: it reads words, and has no idea which of them is a
+    link. So this is UIA or nothing, and nothing is said plainly.
+    """
+    uia = _uia()
+    # -1 is "the last one", which is only knowable after counting them all.
+    if uia is None or index == 0 or index < -1:
+        return None
+    control_type = CONTROL_TYPES.get(kind.lower())
+    if control_type is None:
+        return None
+
+    try:
+        hwnd = focus.foreground()
+        root = uia.ElementFromHandle(hwnd) if hwnd else uia.GetRootElement()
+        if root is None:
+            return None
+        TREE_SUBTREE = 7
+        elements = root.FindAll(TREE_SUBTREE, uia.CreateTrueCondition())
+    except Exception as exc:
+        log.debug("UIA enumeration failed: %s", exc)
+        return None
+
+    found = _collect(uia, elements, control_type)
+    if not found:
+        log.debug("no %s controls on screen", kind)
+        return None
+    if index == -1:
+        return found[-1]
+    if len(found) < index:
+        log.debug("wanted %s %d of only %d", kind, index, len(found))
+        return None
+    return found[index - 1]
+
+
+def _collect(_uia_unused, elements, control_type: int) -> list[Target]:
+    """Every on-screen control of one type, in reading order."""
+    ours = focus.our_window_rects()
+    width, height = _screen_size()
+    found: list[Target] = []
+    for position in range(elements.Length):
+        try:
+            element = elements.GetElement(position)
+            if element.CurrentControlType != control_type:
+                continue
+            r = element.CurrentBoundingRectangle
+            box = (int(r.left), int(r.top), int(r.right), int(r.bottom))
+            if box[2] <= box[0] or box[3] <= box[1]:
+                continue
+            # Scrolled-away content keeps its place in the tree with
+            # coordinates far off the screen -- a VS Code window reported
+            # links at y=-45966. Counting those makes "the first link" a
+            # thing the user cannot see.
+            if box[1] < 0 or box[0] < 0 or box[1] > height or box[0] > width:
+                continue
+            if _excluded(box, ours):
+                continue
+            found.append(
+                Target(
+                    (element.CurrentName or "").strip(),
+                    *box,
+                    score=100.0,
+                    source="uia",
+                )
+            )
+        except Exception:
+            continue
+    # Reading order, which is what "first" means to the person looking at it.
+    found.sort(key=lambda t: (t.top, t.left))
+    return found
+
+
+def _screen_size() -> tuple[int, int]:
+    try:
+        import pyautogui
+
+        return pyautogui.size()
+    except Exception:
+        return (1920, 1080)

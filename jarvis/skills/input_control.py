@@ -370,3 +370,60 @@ def do_click_text(ctx, label: str = "", where: str | None = None, **_) -> Action
         detail=f"clicked {target.text!r} at {x},{y} via {target.source}",
         data={"matched": target.text, "x": x, "y": y, "source": target.source},
     )
+
+
+# Spoken ordinals. "1st" and friends survive `normalize`, so both forms are
+# listed rather than trying to parse digits and suffixes separately.
+ORDINALS = {
+    "first": 1, "1st": 1, "one": 1,
+    "second": 2, "2nd": 2, "two": 2,
+    "third": 3, "3rd": 3, "three": 3,
+    "fourth": 4, "4th": 4, "four": 4,
+    "fifth": 5, "5th": 5, "five": 5,
+    "sixth": 6, "6th": 6, "six": 6,
+    "seventh": 7, "7th": 7, "seven": 7,
+    "eighth": 8, "8th": 8, "eight": 8,
+    "ninth": 9, "9th": 9, "nine": 9,
+    "tenth": 10, "10th": 10, "ten": 10,
+    "last": -1,
+}
+
+
+@intent(
+    r"^(?:click|choose|select|open|tap|pick|hit)\s+(?:on\s+)?(?:the\s+)?"
+    r"(?P<which>first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth"
+    r"|last|1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th)"
+    r"\s+(?P<kind>link|result|button|item|tab)s?$",
+    name="click_nth",
+    # Above click_text, which would otherwise take "first" as a label and go
+    # looking for the word "first" written somewhere on screen. It is not, so
+    # the honest answer was "I can't see first on screen" -- correct, and no
+    # use to someone pointing at a list of search results.
+    priority=4,
+    description="Click something by its position on screen",
+    examples=("click the first link", "open the second result", "click the last tab"),
+)
+def do_click_nth(ctx, which: str = "", kind: str = "", **_) -> ActionResult:
+    from jarvis.core import screen
+
+    index = ORDINALS.get((which or "").lower())
+    if index is None:
+        return ActionResult.fail(f"I don't know which one {which!r} is.")
+
+    target = screen.find_nth(kind, index)
+    if target is None:
+        return ActionResult.fail(
+            f"I can't pick the {which} {kind} here.",
+            "This app publishes no such controls to the accessibility tree. "
+            "Naming what the link says works instead.",
+        )
+    x, y = target.centre
+    act.move(x, y)
+    act.click()
+    label = target.text or f"{which} {kind}"
+    return ActionResult(
+        ok=True,
+        say="",
+        detail=f"clicked the {which} {kind}, {label!r}, at {x},{y}",
+        data={"matched": target.text, "x": x, "y": y, "index": index},
+    )
