@@ -26,6 +26,11 @@ SHORTLIST = 18
 # Bounded so a confused model cannot turn one phrase into a rampage.
 MAX_PLAN_STEPS = 4
 
+# Intents that can take a request nothing else fits. These are pinned to
+# the shortlist however poorly they rank, because ranking them out does
+# not narrow the menu -- it removes the only command that could serve.
+CATCH_ALLS = ("click text", "open app", "web search", "autopilot")
+
 SYSTEM_PROMPT = """You translate a user's spoken request into commands from \
 the list below. Reply with the command text only: no quotes, no explanation, \
 no punctuation at the end. If nothing in the list fits, reply exactly: UNKNOWN
@@ -74,20 +79,30 @@ class Brain:
             return bool(self.cfg.key())
         return True  # ollama needs no credential
 
-    def _phrasings(self, intents) -> list[tuple[str, str]]:
-        """(example, description) for every intent, computed once.
+    def _phrasings(self, intents) -> list[tuple[str, str, str]]:
+        """(example, description, everything-to-rank-against), computed once.
 
         The description carries the intent's slot names where it has any.
         Without them the model reads each entry as a fixed string: shown only
         "open chrome" it answered UNKNOWN to "notepad open pannu" and, worse,
         rewrote "open omen gaming" to "open chrome" -- substituting the
         example itself rather than filling the blank in it.
+
+        The third field exists because ranking used to compare against the
+        first example alone. click_text's first example is "choose AD
+        JAYANTAN", so "select krishna profile" scored nothing against it and
+        the one command that could have served never reached the model --
+        even though "select Guest mode" sits in the same intent's other
+        examples.
         """
         if not self._phrasing_cache:
             self._phrasing_cache = [
                 (
                     item.examples[0] if item.examples else item.name.replace("_", " "),
                     _describe(item),
+                    " ".join(
+                        [*item.examples, item.name.replace("_", " "), item.description]
+                    ),
                 )
                 for item in intents
             ]
@@ -106,7 +121,9 @@ class Brain:
         """
         entries = self._phrasings(intents)
         if not text:
-            return "\n".join(f"- {ex}  ({desc})" for ex, desc in entries)
+            return "\n".join(
+                f"- {ex}  ({desc})" for ex, desc, _rank in entries
+            )
         try:
             from rapidfuzz import fuzz
         except ImportError:
@@ -114,13 +131,11 @@ class Brain:
         else:
             entries = sorted(
                 entries,
-                key=lambda e: max(
-                    fuzz.token_set_ratio(text, e[0]),
-                    fuzz.token_set_ratio(text, e[1]),
-                ),
+                key=lambda e: fuzz.token_set_ratio(text, e[2]),
                 reverse=True,
             )[:SHORTLIST]
-        return "\n".join(f"- {ex}  ({desc})" for ex, desc in entries)
+        entries = _with_catch_alls(entries, self._phrasings(intents))
+        return "\n".join(f"- {ex}  ({desc})" for ex, desc, _rank in entries)
 
     def plan(self, text: str, intents) -> str | None:
         """Return a router-runnable command string, or None."""
@@ -374,3 +389,26 @@ def _describe(intent) -> str:
     if not slots:
         return description
     return f"{description}; fill in: {', '.join(slots)}"
+
+
+def _with_catch_alls(chosen, everything):
+    """Make sure the open-ended commands are always on the menu.
+
+    Most intents are specific and it is fine for them to be ranked off the
+    shortlist: if the user did not ask about the volume, the volume commands
+    are noise. These few are different. They are the ones that can absorb a
+    request nothing else fits, so leaving them out does not narrow the menu,
+    it removes the only answer. "select krishna profile" reached a model that
+    had never been shown click_text, and it replied UNKNOWN.
+    """
+    present = {entry[0] for entry in chosen}
+    extra = [
+        entry
+        for entry in everything
+        if entry[0] not in present and any(name in entry[2] for name in CATCH_ALLS)
+    ]
+    if not extra:
+        return chosen
+    # Trim from the tail, which is the worst-ranked end of the shortlist.
+    keep = max(0, SHORTLIST - len(extra))
+    return chosen[:keep] + extra
