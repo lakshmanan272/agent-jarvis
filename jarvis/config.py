@@ -116,6 +116,22 @@ class BrainConfig:
 
 
 @dataclass
+class EditorConfig:
+    """The code editor Jarvis drives from the command line.
+
+    Antigravity is a VS Code fork, so its CLI takes the same arguments; the
+    same settings work for `code` or `codium` by changing `cli`. Left blank,
+    the path is discovered on first use and not written back -- a machine
+    where the editor moves should keep working without an edit here.
+    """
+
+    cli: str = ""
+    # Where a bare project name is looked up, so "open agent jarvis in
+    # antigravity" does not need the full path spoken aloud.
+    project_roots: tuple[str, ...] = ()
+
+
+@dataclass
 class UIConfig:
     enabled: bool = True
     # Nearly solid. At 0.92 the window behind bled through the text enough
@@ -137,6 +153,7 @@ class Config:
     hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
     brain: BrainConfig = field(default_factory=BrainConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    editor: EditorConfig = field(default_factory=EditorConfig)
     log_level: str = "INFO"
 
     @classmethod
