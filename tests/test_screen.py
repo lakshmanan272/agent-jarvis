@@ -184,3 +184,56 @@ def test_intent_precedence(router, phrase, expected):
     text = normalize(phrase)
     hit = next((i.name for i in router.intents if i.match(text)), "-")
     assert hit == expected
+
+
+# --- a fragment is not the thing you asked for ------------------------------
+# "click conform and continue" on a page holding a "Confirm and continue"
+# button clicked the word "and" instead. Both token_set_ratio and
+# partial_ratio reward a candidate whose words are a SUBSET of the query, so
+# the three-letter word scored 100 and the button 95.
+
+
+def _best(query, candidates):
+    from jarvis.core.screen import MATCH_FLOOR, _score
+
+    scored = [(c, _score(query, c)) for c in candidates]
+    winner, score = max(scored, key=lambda pair: pair[1])
+    return (winner, score) if score >= MATCH_FLOOR else (None, score)
+
+
+def test_a_shared_word_does_not_beat_the_whole_label():
+    winner, _score_value = _best(
+        "conform and continue",
+        ["and", "Confirm and continue", "continue", "Manage", "Confirm"],
+    )
+    assert winner == "Confirm and continue"
+
+
+@pytest.mark.parametrize("fragment", ["and", "continue", "Confirm"])
+def test_a_fragment_alone_is_not_good_enough(fragment):
+    """Even with nothing else on screen, one word of three is not the button.
+    Clicking the wrong thing is worse than reporting that it was not found."""
+    winner, _score_value = _best("conform and continue", [fragment])
+    assert winner is None
+
+
+def test_extra_words_on_the_label_are_still_fine():
+    """The other direction must keep working: the label may say more than
+    was asked for, which is how a profile card reads."""
+    winner, _s = _best("AD JAYANTAN", ["AD JAYANTAN Profile 3", "Krishna"])
+    assert winner == "AD JAYANTAN Profile 3"
+
+
+def test_a_one_word_query_still_matches_a_spaced_label():
+    winner, _s = _best("ZEPHYRQUOKKA", ["Zephyr Quokka", "Q"])
+    assert winner == "Zephyr Quokka"
+
+
+def test_a_stray_letter_is_never_the_answer():
+    assert _best("ZEPHYRQUOKKA", ["Q", "x", "."])[0] is None
+
+
+def test_a_misspelling_still_finds_the_button():
+    """Coverage is fuzzy per word, so "conform" is covered by "Confirm"."""
+    winner, _s = _best("conform and continue", ["Confirm and continue"])
+    assert winner == "Confirm and continue"

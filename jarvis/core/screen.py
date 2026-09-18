@@ -103,7 +103,39 @@ def _score(query: str, candidate: str) -> float:
     # have clicked it.
     if len(candidate) >= len(query) * 0.8:
         score = max(score, fuzz.partial_ratio(query, candidate))
-    return score
+
+    # Both of those are generous in the same direction: they reward a candidate
+    # whose words are a *subset* of the query. Asked to "click conform and
+    # continue" on a page holding a "Confirm and continue" button, the word
+    # "and" scored 100 and the button 95, so Jarvis clicked the word "and".
+    #
+    # Extra words on the label are fine -- that is the "Profile 3" case. Missing
+    # words are not: a fragment is not the thing asked for. So the score is
+    # scaled by how much of the *query* the candidate actually accounts for.
+    return score * _coverage(fuzz, query, candidate)
+
+
+def _coverage(fuzz, query: str, candidate: str) -> float:
+    """What fraction of the query's words the candidate accounts for, 0-1.
+
+    Fuzzy per word, so a misspelling costs nothing: "conform" is covered by
+    "confirm". Short filler words are ignored on their own but still count
+    when the query is nothing but them.
+    """
+    words = [w for w in query.split() if w]
+    if not words:
+        return 1.0
+    meaningful = [w for w in words if len(w) > 2] or words
+    labels = [w for w in candidate.split() if w] or [candidate]
+    def present(word: str) -> bool:
+        if max(fuzz.ratio(word, label) for label in labels) >= 80:
+            return True
+        # Against the whole label too, so a query written as one word still
+        # matches a label that spaces it out: "ZEPHYRQUOKKA" is covered by
+        # "Zephyr Quokka", which per-word comparison alone would miss.
+        return len(word) > 5 and fuzz.partial_ratio(word, candidate) >= 85
+
+    return sum(1 for w in meaningful if present(w)) / len(meaningful)
 
 
 def _excluded(box: tuple[int, int, int, int], ours: list[tuple[int, int, int, int]]) -> bool:
