@@ -16,3 +16,7 @@ models/
 .idea/
 .DS_Store
 Thumbs.db
+
+# A second project that lives here for reference. It carries a hardcoded
+# Gemini API key in its source, so it must never enter this repository.
+CTRL_AI_Agentic_Desktop_Assistant/

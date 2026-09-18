@@ -35,6 +35,12 @@ step, join them with " and " in the order they must run, up to {max_steps} \
 steps. Never drop a step the user asked for: "delete all the text" is \
 "select all and delete", not "select all".
 
+Each entry below is an EXAMPLE, not a fixed string. The specific words in it \
+-- app names, search terms, numbers, file names -- are blanks to fill with what \
+the user actually asked for, and "fill in:" names them. So "open chrome" covers \
+opening any application: for "notepad open pannu" answer "open notepad", and \
+for "open omen gaming" answer "open omen gaming" -- never substitute the example's own words.
+
 Available commands (with example phrasings):
 {catalog}"""
 
@@ -65,12 +71,19 @@ class Brain:
         return True  # ollama needs no credential
 
     def _phrasings(self, intents) -> list[tuple[str, str]]:
-        """(example, description) for every intent, computed once."""
+        """(example, description) for every intent, computed once.
+
+        The description carries the intent's slot names where it has any.
+        Without them the model reads each entry as a fixed string: shown only
+        "open chrome" it answered UNKNOWN to "notepad open pannu" and, worse,
+        rewrote "open omen gaming" to "open chrome" -- substituting the
+        example itself rather than filling the blank in it.
+        """
         if not self._phrasing_cache:
             self._phrasing_cache = [
                 (
                     item.examples[0] if item.examples else item.name.replace("_", " "),
-                    item.description or item.name,
+                    _describe(item),
                 )
                 for item in intents
             ]
@@ -114,17 +127,10 @@ class Brain:
         prompt = SYSTEM_PROMPT.format(
             catalog=self._build_catalog(intents, text), max_steps=MAX_PLAN_STEPS
         )
-        try:
-            if self.cfg.provider == "anthropic":
-                reply = self._anthropic(httpx, prompt, text)
-            elif self.cfg.provider == "openai":
-                reply = self._openai(httpx, prompt, text)
-            else:
-                reply = self._ollama(httpx, prompt, text)
-        except Exception as exc:
-            log.warning("brain call failed: %s", exc)
+        reply = self._ask(httpx, prompt, text)
+        if reply is None:
             return None
-        reply = (reply or "").strip().strip('"').strip()
+        reply = _unwrap(reply)
         if not reply or reply.upper().startswith("UNKNOWN"):
             return None
         # Guard against the model echoing the prompt or waffling. A chain of
@@ -150,21 +156,10 @@ class Brain:
             return None
 
         prompt = COMPOSE_PROMPT.format(words=words)
-        try:
-            if self.cfg.provider == "anthropic":
-                reply = self._anthropic(
-                    httpx, prompt, request,
-                    max_tokens=words * 3, timeout=COMPOSE_TIMEOUT_S,
-                )
-            elif self.cfg.provider == "openai":
-                reply = self._openai(
-                    httpx, prompt, request,
-                    max_tokens=words * 3, timeout=COMPOSE_TIMEOUT_S,
-                )
-            else:
-                reply = self._ollama(httpx, prompt, request)
-        except Exception as exc:
-            log.warning("compose failed: %s", exc)
+        reply = self._ask(
+            httpx, prompt, request, max_tokens=words * 3, timeout=COMPOSE_TIMEOUT_S
+        )
+        if reply is None:
             return None
 
         text = (reply or "").strip().strip('"')
@@ -174,6 +169,32 @@ class Brain:
             log.info("compose returned %d chars, discarding", len(text))
             return None
         return text
+
+    def _ask(
+        self, httpx, system: str, text: str,
+        max_tokens: int = 64, timeout: float | None = None,
+    ) -> str | None:
+        """Ask the model, falling back to a second service if the first will not.
+
+        A free tier rate-limits, and when it does every command that needed
+        the planner answers "I don't know how to ...". The fallback runs the
+        identical path with a different config, so there is no second, less
+        tested route to a model.
+        """
+        for cfg, label in self._providers():
+            try:
+                return _invoke(httpx, cfg, system, text, max_tokens, timeout)
+            except Exception as exc:
+                log.warning("%s call failed: %s", label, exc)
+        return None
+
+    def _providers(self):
+        """The configs to try, in order. The fallback is optional."""
+        chain = [(self.cfg, "brain")]
+        fallback = self.cfg.fallback()
+        if fallback is not None:
+            chain.append((fallback, f"brain fallback ({fallback.model})"))
+        return chain
 
     def _anthropic(
         self, httpx, system: str, text: str,
@@ -246,3 +267,46 @@ class Brain:
         )
         response.raise_for_status()
         return response.json().get("message", {}).get("content", "")
+
+
+def _invoke(httpx, cfg, system: str, text: str, max_tokens: int, timeout):
+    """One model call, for whichever provider `cfg` names."""
+    brain = Brain(cfg)
+    if cfg.provider == "anthropic":
+        return brain._anthropic(httpx, system, text, max_tokens, timeout)
+    if cfg.provider == "openai":
+        return brain._openai(httpx, system, text, max_tokens, timeout)
+    return brain._ollama(httpx, system, text)
+
+
+def _unwrap(reply: str) -> str:
+    """Strip the decoration models put around a one-line answer.
+
+    Gemini returns `start notepad` in backticks and sometimes in a fenced
+    block; left in place the backticks reach the router as part of the
+    command and nothing matches.
+    """
+    text = (reply or "").strip()
+    if text.startswith("```"):
+        lines = [ln for ln in text.splitlines() if not ln.startswith("```")]
+        text = "\n".join(lines).strip()
+    return text.strip('`').strip('"').strip("'").strip()
+
+
+def _slots(intent) -> list[str]:
+    """The named groups an intent captures: the parts a caller fills in."""
+    names: list[str] = []
+    for pattern in intent.patterns:
+        for name in pattern.groupindex:
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _describe(intent) -> str:
+    """The description a model sees, with the fill-in-the-blank parts named."""
+    description = intent.description or intent.name
+    slots = _slots(intent)
+    if not slots:
+        return description
+    return f"{description}; fill in: {', '.join(slots)}"

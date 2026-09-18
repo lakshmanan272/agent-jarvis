@@ -109,10 +109,40 @@ class BrainConfig:
     ollama_url: str = "http://127.0.0.1:11434"
     timeout_s: float = 8.0
 
+    # A second service to try when the first one refuses. Measured need: a
+    # free tier rate-limits, and 15 calls in one session came back 429 with
+    # nothing to fall back to, so every one of them answered "I don't know
+    # how to ...". Left blank there is no fallback and behaviour is unchanged.
+    fallback_provider: str = ""        # "openai" | "anthropic" | "ollama"
+    fallback_model: str = ""
+    fallback_base_url: str = ""
+    fallback_api_key_env: str = ""
+    fallback_api_key: str = ""
+
     def key(self) -> str:
         import os
 
         return os.environ.get(self.api_key_env, "") or self.api_key
+
+    def fallback(self) -> BrainConfig | None:
+        """The fallback as a config in its own right, or None.
+
+        Returning a whole BrainConfig rather than a special case means the
+        calling code runs the fallback through exactly the same path as the
+        primary -- there is no second, less-tested way to reach a model.
+        """
+        if not self.fallback_provider:
+            return None
+        return BrainConfig(
+            enabled=True,
+            provider=self.fallback_provider,
+            model=self.fallback_model or self.model,
+            api_key_env=self.fallback_api_key_env,
+            api_key=self.fallback_api_key,
+            base_url=self.fallback_base_url,
+            ollama_url=self.ollama_url,
+            timeout_s=self.timeout_s,
+        )
 
 
 @dataclass
